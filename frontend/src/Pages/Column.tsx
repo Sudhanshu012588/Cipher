@@ -1,22 +1,23 @@
-import React, { useState } from "react";
+
+// Imported Config, Types, Utilities, and Styles
+
+
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 
-// Components
+// Imported Components
 import Navbar from "../Components/Navbar";
 import ColumnViewer from "../Components/ColumnViewer";
 
-// Config, Types, Utilities, and Styles
+// Imported Config, Types, Utilities, and Styles
 import { DESIGN_URL, STL_URL } from "../constants";
 import type { DesignForm, DesignResult } from "../types";
 import { formatKey, formatValue } from "../utils";
 import { inputStyle, unitStyle, tabStyle } from "../styles";
 
-export default function ColumnDesign() {
-  /* ----------------------------------------------------------
-     Form
-     ---------------------------------------------------------- */
+export default function Column() {
   const [form, setForm] = useState<DesignForm>({
     Length: 3,
     Fac_Axial_Load: 500,
@@ -24,9 +25,6 @@ export default function ColumnDesign() {
     Sections: "I",
   });
 
-  /* ----------------------------------------------------------
-     State
-     ---------------------------------------------------------- */
   const [result, setResult] = useState<DesignResult | null>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,9 +32,6 @@ export default function ColumnDesign() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"model" | "report">("model");
 
-  /* ----------------------------------------------------------
-     Handlers
-     ---------------------------------------------------------- */
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
@@ -56,7 +51,6 @@ export default function ColumnDesign() {
       
       loadedGeometry.computeVertexNormals();
       loadedGeometry.center();
-      
       setGeometry(loadedGeometry);
     } catch (e) {
       console.error("Failed to load Column.stl:", e);
@@ -108,14 +102,10 @@ export default function ColumnDesign() {
     setError(null);
   };
 
-  /* ----------------------------------------------------------
-     Render
-     ---------------------------------------------------------- */
   return (
     <div style={{ minHeight: "100vh", background: "#eef1f5" }}>
       <Navbar />
 
-      {/* HEADER */}
       <div style={{ background: "#162434", color: "white", padding: "28px 5%" }}>
         <div style={{ color: "#9dafc4", marginBottom: "18px" }}>
           Design <span style={{ margin: "0 12px" }}>›</span>
@@ -127,7 +117,6 @@ export default function ColumnDesign() {
         </p>
       </div>
 
-      {/* MAIN */}
       <div style={{ display: "grid", gridTemplateColumns: "410px minmax(0, 1fr)", gap: "28px", padding: "36px 5%" }}>
         
         {/* LEFT PANEL */}
