@@ -2,8 +2,8 @@
 ## All Forces are in KN
 ## ALl strees are in MPa
 
-Buckling_CSV = "C:\\Users\\taada\\project\\Cipher\\Backend\\CSV_Data\\buckling_curves_IS800.csv"
-Steel_Table_CSV = "C:\\Users\\taada\\project\\Cipher\\Backend\\CSV_Data\\steel_sections_I_C_IS808_fixed.csv"
+Buckling_CSV = "/Users/sudhanshujha/Documents/ProjectCipher/Backend/CSV_Data/buckling_curves_IS800.csv"
+Steel_Table_CSV = "/Users/sudhanshujha/Documents/ProjectCipher/Backend/CSV_Data/steel_sections_I_C_IS808_fixed.csv"
 
 function select_section(sections,required_area;section_type="I")
 
