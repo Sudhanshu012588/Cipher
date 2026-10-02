@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronRight,
+  FileText,
   Loader2,
   RotateCcw,
   Ruler,
@@ -37,6 +38,18 @@ const Column = () => {
 
   const [error, setError] = useState<string | null>(null);
 
+  const [report, setReport] = useState<string | null>(null);
+
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const [reportError, setReportError] = useState<string | null>(null);
+
+
+  const clearReport = () => {
+    setReport(null);
+    setReportError(null);
+  };
+
 
   const updateField = <K extends keyof ColumnForm>(
     field: K,
@@ -51,6 +64,7 @@ const Column = () => {
     // Remove previous result when inputs change
     setResult(null);
     setError(null);
+    clearReport();
   };
 
 
@@ -65,6 +79,7 @@ const Column = () => {
 
     setResult(null);
     setError(null);
+    clearReport();
   };
 
 
@@ -73,6 +88,7 @@ const Column = () => {
     setLoading(true);
     setResult(null);
     setError(null);
+    clearReport();
 
     try {
 
@@ -128,6 +144,49 @@ const Column = () => {
     } finally {
 
       setLoading(false);
+    }
+  };
+
+
+  const generateReport = async () => {
+
+    setReportLoading(true);
+    clearReport();
+
+    try {
+
+      const response = await axios.post(
+        "http://127.0.0.1:8080/report/column",
+        form,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.data?.error) {
+        setReportError(
+          response.data.message
+            ? `${response.data.error} ${response.data.message}`
+            : response.data.error
+        );
+      } else {
+        setReport(response.data.report);
+      }
+
+    } catch (err) {
+
+      setReportError(
+        axios.isAxiosError(err) && !err.response
+          ? "Unable to connect to the design engine. " +
+            "Please make sure the backend is running on 127.0.0.1:8080."
+          : "The report could not be generated."
+      );
+
+    } finally {
+
+      setReportLoading(false);
     }
   };
 
@@ -361,7 +420,7 @@ const Column = () => {
 
           {/* ================= REPORT ================= */}
 
-          <section>
+          <section className="space-y-6">
 
             {!result && !error && (
               <EmptyReport />
@@ -378,6 +437,16 @@ const Column = () => {
 
             {result && (
               <SuccessReport result={result} />
+            )}
+
+
+            {result && !result.error && (
+              <ReportPanel
+                report={report}
+                loading={reportLoading}
+                error={reportError}
+                onGenerate={generateReport}
+              />
             )}
 
           </section>
@@ -665,6 +734,123 @@ const SuccessReport = ({
         />
 
       </div>
+
+    </div>
+  );
+};
+
+
+/* =========================================================
+   LLM REPORT
+   Explanation layer only: the numbers come from the design
+   engine, the LLM just writes them up.
+========================================================= */
+
+type ReportPanelProps = {
+  report: string | null;
+  loading: boolean;
+  error: string | null;
+  onGenerate: () => void;
+};
+
+
+const ReportPanel = ({
+  report,
+  loading,
+  error,
+  onGenerate,
+}: ReportPanelProps) => {
+
+  // Split "## Heading" blocks; fall back to one block if none found
+  const blocks = report
+    ? report.includes("## ")
+      ? report
+          .split(/^##\s+/m)
+          .map((b) => b.trim())
+          .filter(Boolean)
+          .map((b) => {
+            const [title, ...rest] = b.split("\n");
+            return { title: title.trim(), body: rest.join("\n").trim() };
+          })
+      : [{ title: "", body: report }]
+    : [];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+
+      <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between gap-4">
+
+        <div>
+
+          <h2 className="text-sm font-semibold text-slate-900">
+            Engineering Report
+          </h2>
+
+          <p className="mt-1 text-xs text-slate-500">
+            Written summary of the results above.
+          </p>
+
+        </div>
+
+        <button
+          onClick={onGenerate}
+          disabled={loading}
+          className="h-10 px-4 rounded-md bg-[#172331] hover:bg-slate-700 disabled:bg-slate-400 text-white text-sm font-semibold flex items-center gap-2 transition shrink-0"
+        >
+
+          {loading ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              <FileText size={16} />
+              Generate Report
+            </>
+          )}
+
+        </button>
+
+      </div>
+
+
+      {error && (
+        <div className="m-6 p-4 rounded-md bg-red-50 border border-red-200 text-xs leading-5 text-red-700">
+          {error}
+        </div>
+      )}
+
+
+      {blocks.length > 0 && (
+
+        <div className="p-6 space-y-5">
+
+          {blocks.map((b, i) => (
+
+            <div key={i}>
+
+              {b.title && (
+                <h3 className="text-xs font-semibold text-slate-800 mb-2">
+                  {b.title}
+                </h3>
+              )}
+
+              <p className="text-xs leading-5 text-slate-700 whitespace-pre-wrap">
+                {b.body}
+              </p>
+
+            </div>
+
+          ))}
+
+          <p className="pt-4 border-t border-slate-100 text-[10px] text-slate-400">
+            AI-written summary of the calculated values. The design results table above is the source of truth.
+          </p>
+
+        </div>
+
+      )}
 
     </div>
   );
