@@ -3,6 +3,37 @@ using HTTP
 using JSON3
 using CSV
 using DataFrames
+using Gmsh
+include(joinpath(@__DIR__,"Column","Logic_Column.jl"))
+
+include(joinpath(@__DIR__,"Column","Mesh.jl"))
+const BACKEND_DIR = @__DIR__
+const COLUMN_DIR = joinpath(BACKEND_DIR,"Column")
+const MESH_FILE = joinpath(COLUMN_DIR,"Column.msh")
+const STL_FILE = joinpath(COLUMN_DIR,"Column.stl")
+const CORS = Cors(
+    allowed_origins = ["*"],
+    allowed_headers = ["*"],
+    allowed_methods = [
+        "GET",
+        "POST",
+        "OPTIONS"
+    ]
+)
+
+function json_response(
+    status::Int,
+    data
+)
+
+    return HTTP.Response(
+        status,
+        [
+            "Content-Type" =>
+                "application/json"
+        ],
+        JSON3.write(data)
+    )
 
 include("./Column/Logic_Column.jl")
 include("./Column/Logic_Column.jl")
@@ -51,6 +82,20 @@ function cors_handler(handler)
     end
 
 end
+@get "/design/column/stl" function(req)
+    try
+        if !isfile(STL_FILE)
+
+            return json_response(
+                404,
+                Dict(
+                    "error" =>
+                        "Column.stl does not exist.",
+
+                    "path" =>
+                        STL_FILE
+                )
+            )
 
 
 @get "/health" function (req::HTTP.Request)
@@ -65,26 +110,34 @@ end
 
     body = JSON3.read(String(req.body))
 
-    Length = Float64(body.Length)
+    catch e
 
-    Fac_Axial_Load =
-        Float64(body.Fac_Axial_Load)
+        return json_response(
+            500,
+            Dict(
+                "error" =>
+                    "Unable to read Column.stl.",
 
-    Boundary_Condition =
-        Int(body.Boundary_Condition)
+                "message" =>
+                    sprint(
+                        showerror,
+                        e
+                    )
+            )
+        )
 
-    Sections =
-        String(body.Sections)
+    end
 
+end
+@get "/health" function(req)
 
-    result = Design_Column(
-        Length,
-        Fac_Axial_Load,
-        Boundary_Condition,
-        Sections
+    return json_response(
+        200,
+        Dict(
+            "status" => "ok",
+            "service" => "Column Design Engine"
+        )
     )
-
-    return result
 
 end
 
@@ -104,7 +157,7 @@ end
 end
 
 serve(
-    middleware=[
-        cors_handler
-    ]
+    host = "127.0.0.1",
+    port = 8080,
+    middleware = [CORS]
 )

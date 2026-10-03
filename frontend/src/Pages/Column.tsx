@@ -1,33 +1,23 @@
-import React, { useState } from "react";
+
+// Imported Config, Types, Utilities, and Styles
+
+
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  FileText,
-  Loader2,
-  RotateCcw,
-  Ruler,
-  TriangleAlert,
-} from "lucide-react";
-
-// Components
+// Imported Components
 import Navbar from "../Components/Navbar";
 import ColumnViewer from "../Components/ColumnViewer";
 
-// Config, Types, Utilities, and Styles
+// Imported Config, Types, Utilities, and Styles
 import { DESIGN_URL, STL_URL } from "../constants";
 import type { DesignForm, DesignResult } from "../types";
 import { formatKey, formatValue } from "../utils";
 import { inputStyle, unitStyle, tabStyle } from "../styles";
 
-export default function ColumnDesign() {
-  /* ----------------------------------------------------------
-     Form
-     ---------------------------------------------------------- */
+export default function Column() {
   const [form, setForm] = useState<DesignForm>({
     Length: 3,
     Fac_Axial_Load: 500,
@@ -35,9 +25,6 @@ export default function ColumnDesign() {
     Sections: "I",
   });
 
-  /* ----------------------------------------------------------
-     State
-     ---------------------------------------------------------- */
   const [result, setResult] = useState<DesignResult | null>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,54 +32,38 @@ export default function ColumnDesign() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"model" | "report">("model");
 
-  const [report, setReport] = useState<string | null>(null);
-
-  const [reportLoading, setReportLoading] = useState(false);
-
-  const [reportError, setReportError] = useState<string | null>(null);
-
-
-  const clearReport = () => {
-    setReport(null);
-    setReportError(null);
-  };
-
-
-  const updateField = <K extends keyof ColumnForm>(
-    field: K,
-    value: ColumnForm[K]
+  const handleChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     const { name, value } = event.target;
     setForm(previous => ({
       ...previous,
       [name]: name === "Sections" ? value : Number(value),
     }));
-
-    // Remove previous result when inputs change
-    setResult(null);
-    setError(null);
-    clearReport();
   };
 
-
-  const resetForm = () => {
-
-    setForm({
-      Length: 3.0,
-      Fac_Axial_Load: 500.0,
-      Boundary_Condition: 0,
-      Sections: "I",
-    });
-
-    setResult(null);
-    setError(null);
-    clearReport();
+  const loadSTL = async () => {
+    setMeshLoading(true);
+    try {
+      const loader = new STLLoader();
+      const url = `${STL_URL}?t=${Date.now()}`;
+      const loadedGeometry = await loader.loadAsync(url);
+      
+      loadedGeometry.computeVertexNormals();
+      loadedGeometry.center();
+      setGeometry(loadedGeometry);
+    } catch (e) {
+      console.error("Failed to load Column.stl:", e);
+      setError("Column design succeeded, but the 3D model could not be loaded.");
+    } finally {
+      setMeshLoading(false);
+    }
   };
 
   const handleDesign = async () => {
     setLoading(true);
     setError(null);
-    clearReport();
+    setGeometry(null);
 
     try {
       const response = await axios.post<DesignResult>(DESIGN_URL, form, {
@@ -131,54 +102,10 @@ export default function ColumnDesign() {
     setError(null);
   };
 
-  const generateReport = async () => {
-
-    setReportLoading(true);
-    clearReport();
-
-    try {
-
-      const response = await axios.post(
-        "http://127.0.0.1:8080/report/column",
-        form,
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (response.data?.error) {
-        setReportError(
-          response.data.message
-            ? `${response.data.error} ${response.data.message}`
-            : response.data.error
-        );
-      } else {
-        setReport(response.data.report);
-      }
-
-    } catch (err) {
-
-      setReportError(
-        axios.isAxiosError(err) && !err.response
-          ? "Unable to connect to the design engine. " +
-            "Please make sure the backend is running on 127.0.0.1:8080."
-          : "The report could not be generated."
-      );
-
-    } finally {
-
-      setReportLoading(false);
-    }
-  };
-
-
   return (
     <div style={{ minHeight: "100vh", background: "#eef1f5" }}>
       <Navbar />
 
-      {/* HEADER */}
       <div style={{ background: "#162434", color: "white", padding: "28px 5%" }}>
         <div style={{ color: "#9dafc4", marginBottom: "18px" }}>
           Design <span style={{ margin: "0 12px" }}>›</span>
@@ -190,7 +117,6 @@ export default function ColumnDesign() {
         </p>
       </div>
 
-      {/* MAIN */}
       <div style={{ display: "grid", gridTemplateColumns: "410px minmax(0, 1fr)", gap: "28px", padding: "36px 5%" }}>
         
         {/* LEFT PANEL */}
@@ -215,85 +141,53 @@ export default function ColumnDesign() {
               <span style={unitStyle}>kN</span>
             </div>
 
-          </aside>
+            {/* Boundary condition */}
+            <label style={{ display: "block", fontWeight: 600, color: "#34455d", marginBottom: "8px" }}>Boundary Condition</label>
+            <select name="Boundary_Condition" value={form.Boundary_Condition} onChange={handleChange} style={{ ...inputStyle, marginBottom: "28px" }}>
+              <option value={0}>Pinned - Pinned</option>
+              <option value={1}>Fixed - Fixed</option>
+              <option value={2}>Fixed - Free</option>
+              <option value={3}>Fixed - Pinned</option>
+            </select>
 
+            {/* Section */}
+            <label style={{ display: "block", fontWeight: 600, color: "#34455d", marginBottom: "8px" }}>Section Type</label>
+            <select name="Sections" value={form.Sections} onChange={handleChange} style={{ ...inputStyle, marginBottom: "28px" }}>
+              <option value="I">I Section</option>
+              <option value="C">C / Channel Section</option>
+            </select>
 
-          {/* ================= REPORT ================= */}
-
-          <section className="space-y-6">
-
-            {!result && !error && (
-              <EmptyReport />
-            )}
-
+            {/* Buttons */}
+            <div style={{ display: "flex", gap: "14px" }}>
+              <button
+                onClick={handleDesign}
+                disabled={loading || meshLoading}
+                style={{
+                  flex: 1, border: "none", borderRadius: "7px", background: "#ff4b0b", color: "white", fontSize: "16px", fontWeight: 700, padding: "13px", cursor: loading ? "wait" : "pointer"
+                }}
+              >
+                {loading ? "Designing..." : "Design Column"}
+              </button>
+              <button onClick={handleReset} style={{ width: "48px", border: "1px solid #ccd7e3", background: "white", borderRadius: "7px", fontSize: "20px", cursor: "pointer" }}>
+                ↻
+              </button>
+            </div>
 
             {/* Error */}
             {error && (
-              <ErrorReport
-                error={error}
-                form={form}
-              />
-            )}
-
-
-            {result && (
-              <SuccessReport result={result} />
-            )}
-
-
-            {result && !result.error && (
-              <ReportPanel
-                report={report}
-                loading={reportLoading}
-                error={reportError}
-                onGenerate={generateReport}
-              />
-            )}
-
-          </section>
-
-        </div>
-
-      </main>
-
-    </div>
-  );
-};
-
-
-/* =========================================================
-   INPUT FIELD
+              <div style={{ marginTop: "22px", padding: "16px", borderRadius: "7px", border: "1px solid #ffb8b8", background: "#fff4f4", color: "#d91c1c" }}>
+                <strong>Error</strong>
+                <div style={{ marginTop: "8px", lineHeight: 1.4 }}>{error}</div>
+              </div>
             )}
           </div>
         </div>
 
-      </div>
-
-
-      {/* Actual Backend Response */}
-
-      <div className="p-6">
-
-        <h3 className="text-xs font-semibold text-slate-800 mb-4">
-          Design Results
-        </h3>
-
-
-        <ReportObject
-          data={result}
-        />
-
-      </div>
-
-    </div>
-  );
-};
-
-
-/* =========================================================
-   LLM REPORT
-   Explanation layer only: the numbers come from the design
-   engine, the LLM just writes them up.
+        {/* RIGHT PANEL */}
+        <div style={{ background: "white", border: "1px solid #dce3eb", borderRadius: "10px", overflow: "hidden", minWidth: 0 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid #e1e6ec" }}>
+            <button onClick={() => setActiveTab("model")} style={tabStyle(activeTab === "model")}>◈&nbsp;&nbsp;3D Model</button>
+            <button onClick={() => setActiveTab("report")} style={tabStyle(activeTab === "report")}>▤&nbsp;&nbsp;Report</button>
           </div>
 
           {activeTab === "model" && (
