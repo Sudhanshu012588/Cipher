@@ -35,85 +35,49 @@ function json_response(
         JSON3.write(data)
     )
 
-end
-@post "/design/column" function(req)
+include("./Column/Logic_Column.jl")
+include("./Column/Logic_Column.jl")
+include("./Report/Report_LLM.jl")
 
-    try
-        body = JSON3.read(String(req.body) )
-        Length = Float64(body["Length"])
-        Fac_Axial_Load = Float64(body["Fac_Axial_Load"])
-        Boundary_Condition = Int(body["Boundary_Condition"])
-        Sections = String(body["Sections"])
-        result = Design_Column(Length,Fac_Axial_Load,Boundary_Condition,Sections)
-        if haskey(result,"error")
-            return json_response(400,result)
-        end
-        mesh_result = create_column_mesh(result;output_file = MESH_FILE,stl_file = STL_FILE)
-        if haskey(mesh_result,"error")
-            return json_response(500,mesh_result)
-        end
-        result["mesh_file"] ="Column.msh"
-        result["mesh_url"] ="/design/column/mesh"
-        result["stl_file"] ="Column.stl"
-        result["stl_url"] ="/design/column/stl"
-        return json_response(200,result)
-    catch e
-        return json_response(
-            500,
-            Dict(
-                "error" =>"Column design failed.",
-                "message" =>
-                    sprint(showerror,e)
-                )
-        )
-    end
-end
-@get "/design/column/mesh" function(req)
-    try
-        if !isfile(MESH_FILE)
-            return json_response(
-                404,
-                Dict(
-                    "error" =>
-                        "Column.msh does not exist.",
+const CORS_HEADERS = [
+    "Access-Control-Allow-Origin" => "*",
+    "Access-Control-Allow-Methods" => "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers" => "Content-Type"
+]
 
-                    "path" =>
-                        MESH_FILE
-                )
+function cors_handler(handler)
+
+    return function(req::HTTP.Request)
+
+        try
+
+            # Browser preflight request
+            if req.method == "OPTIONS"
+                return HTTP.Response(200, CORS_HEADERS)
+            end
+
+            # Execute the actual Oxygen route
+            response = handler(req)
+
+            # Add CORS headers to the response
+            for h in CORS_HEADERS
+                HTTP.setheader(response, h)
+            end
+
+            return response
+
+        catch e
+
+            # Print the real error instead of a bare 500
+            @error "Request failed" path=req.target exception=(e, catch_backtrace())
+
+            return HTTP.Response(
+                500,
+                CORS_HEADERS,
+                JSON3.write(Dict("error" => sprint(showerror, e)))
             )
 
         end
-        mesh_bytes = read(MESH_FILE)
-        return HTTP.Response(
-            200,
-            [
-                "Content-Type" =>
-                    "application/octet-stream",
-
-                "Content-Disposition" =>
-                    "inline; filename=\"Column.msh\"",
-
-                "Cache-Control" =>
-                    "no-store"
-            ],
-            mesh_bytes
-        )
-
-    catch e
-
-        return json_response(
-            500,
-            Dict(
-                "error" =>
-                    "Unable to read Column.msh.",
-
-                "message" =>
-                    sprint(
-                        showerror,
-                        e
-                    )
-            )
-        )
 
     end
 
@@ -133,22 +97,18 @@ end
                 )
             )
 
-        end
-        stl_bytes = read(STL_FILE)
-        return HTTP.Response(
-            200,
-            [
-                "Content-Type" =>
-                    "model/stl",
 
-                "Content-Disposition" =>
-                    "inline; filename=\"Column.stl\"",
+@get "/health" function (req::HTTP.Request)
 
-                "Cache-Control" =>
-                    "no-store"
-            ],
-            stl_bytes
-        )
+    return Dict(
+        "Status" => "Good"
+    )
+
+end
+
+@post "/design/column" function (req::HTTP.Request)
+
+    body = JSON3.read(String(req.body))
 
     catch e
 
@@ -180,6 +140,22 @@ end
     )
 
 end
+
+## LLM-written report for the same inputs as /design/column.
+## Runs the existing Design_Column, then explains its output.
+@post "/report/column" function (req::HTTP.Request)
+
+    body = JSON3.read(String(req.body))
+
+    return Generate_Column_Report(
+        Float64(body.Length),
+        Float64(body.Fac_Axial_Load),
+        Int(body.Boundary_Condition),
+        String(body.Sections)
+    )
+
+end
+
 serve(
     host = "127.0.0.1",
     port = 8080,

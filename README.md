@@ -31,3 +31,19 @@ Test example
 #     "Sections": "I"
 #   }'
 ```
+
+## LLM report generation (optional)
+After a column design succeeds, the UI shows a **Generate Report** button. It calls `POST /report/column`, which re-runs `Design_Column` unchanged and asks an OpenAI-compatible API to write a short report from the results. The LLM only explains; PASS/FAIL checks and all numbers are computed in `Backend/Report/Report_LLM.jl`.
+
+Set these in the shell that runs `julia index.jl` (the key is never sent to the browser):
+```bash
+export LLM_API_KEY="your-key"                      # required (OPENAI_API_KEY also works)
+export LLM_BASE_URL="https://api.openai.com/v1"    # optional, any OpenAI-compatible endpoint
+export LLM_MODEL="gpt-4o-mini"                     # optional
+```
+Test:
+```bash
+curl -X POST http://127.0.0.1:8080/report/column \
+  -H "Content-Type: application/json" \
+  -d '{"Length": 3.0, "Fac_Axial_Load": 500.0, "Boundary_Condition": 0, "Sections": "I"}'
+```
