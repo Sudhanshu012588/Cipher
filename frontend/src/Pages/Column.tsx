@@ -2,7 +2,7 @@
 // Imported Config, Types, Utilities, and Styles
 
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
