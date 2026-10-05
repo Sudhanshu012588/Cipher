@@ -22,14 +22,14 @@ then install the Julia and Oxygen.jl
 ## Testing column design
 Test example
 ```bash
-# curl -X POST http://127.0.0.1:8080/design/column \
-#   -H "Content-Type: application/json" \
-#   -d '{
-#     "Length": 3.0,
-#     "Fac_Axial_Load": 500.0,
-#     "Boundary_Condition": 0,
-#     "Sections": "I"
-#   }'
+ curl -X POST http://127.0.0.1:8080/design/column \
+   -H "Content-Type: application/json" \
+   -d '{
+     "Length": 3.0,
+     "Fac_Axial_Load": 500.0,
+     "Boundary_Condition": 0,
+     "Sections": "I"
+   }'
 ```
 
 ## LLM report generation (optional)
