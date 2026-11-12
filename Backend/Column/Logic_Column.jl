@@ -17,10 +17,7 @@ function select_section(sections,required_area;section_type="I")
         return nothing
     end
 
-    sort!(
-        candidates,
-        :Area_mm2
-    )
+    sort!(candidates,:Area_mm2)
 
     return candidates[1,:]
 end
