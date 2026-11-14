@@ -673,7 +673,7 @@ export default function ColumnDesign() {
             </div>
           )}
 
-          {/* TAB 2: 3D FEM ANALYSIS (VON MISES HEATMAP + SCALED BENDING DEFORMATION) */}
+          {/* TAB 2: 3D FEM ANALYSIS (PINNED CORNER STRESS + DEFORMATION HUD) */}
           {activeTab === "fem" && (
             <div style={{ padding: "24px" }}>
               {femError && (
@@ -695,7 +695,7 @@ export default function ColumnDesign() {
                 </div>
               )}
 
-              {/* CONTROLS BAR: DEFORMATION SCALE + 5-TICK VON MISES LEGEND */}
+              {/* DEFORMATION MAGNIFICATION CONTROLS */}
               {femResult && (
                 <div
                   style={{
@@ -703,96 +703,53 @@ export default function ColumnDesign() {
                     justifyContent: "space-between",
                     alignItems: "center",
                     flexWrap: "wrap",
-                    gap: "18px",
-                    padding: "16px 20px",
-                    marginBottom: "16px",
+                    gap: "14px",
+                    padding: "12px 18px",
+                    marginBottom: "14px",
                     background: "#f8fafc",
                     border: "1px solid #e2e8f0",
                     borderRadius: "8px",
                   }}
                 >
-                  {/* Deformation Exaggeration Controls */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
-                        Deformation Scale: <span style={{ color: "#0f766e" }}>{deformScale}×</span>
-                      </span>
-                      <input
-                        type="range"
-                        min={1}
-                        max={300}
-                        step={5}
-                        value={deformScale}
-                        onChange={(e) => setDeformScale(Number(e.target.value))}
-                        style={{ width: "150px", cursor: "pointer" }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      {[1, 50, 150, 300].map((preset) => (
-                        <button
-                          key={preset}
-                          onClick={() => setDeformScale(preset)}
-                          style={{
-                            padding: "2px 8px",
-                            fontSize: "11px",
-                            fontWeight: 600,
-                            borderRadius: "4px",
-                            border: deformScale === preset ? "1px solid #0f766e" : "1px solid #cbd5e1",
-                            background: deformScale === preset ? "#ccfbf1" : "white",
-                            color: deformScale === preset ? "#0f766e" : "#475569",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {preset === 1 ? "1× (True)" : `${preset}×`}
-                        </button>
-                      ))}
-                    </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                      Deformation Magnification: <span style={{ color: "#0f766e" }}>{deformScale}×</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={300}
+                      step={5}
+                      value={deformScale}
+                      onChange={(e) => setDeformScale(Number(e.target.value))}
+                      style={{ width: "160px", cursor: "pointer" }}
+                    />
                   </div>
 
-                  {/* Descriptive 5-Tick Stress Legend */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "260px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 700, color: "#334155" }}>
-                      <span>Von Mises Stress Contour (MPa)</span>
-                      <span style={{ color: femResult.yield_ratio > 0.85 ? "#dc2626" : "#0f766e" }}>
-                        {Math.round(femResult.yield_ratio * 100)}% of fy (250 MPa)
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "12px",
-                        borderRadius: "4px",
-                        background:
-                          "linear-gradient(90deg, #0000ff 0%, #00ffff 25%, #00ff00 50%, #ffff00 75%, #ff0000 100%)",
-                        border: "1px solid #94a3b8",
-                      }}
-                    />
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 600, color: "#475569" }}>
-                      <span>{femResult.min_von_mises_MPa.toFixed(1)}</span>
-                      <span>
-                        {(
-                          femResult.min_von_mises_MPa +
-                          0.25 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
-                        ).toFixed(1)}
-                      </span>
-                      <span>
-                        {(
-                          0.5 * (femResult.min_von_mises_MPa + femResult.max_von_mises_MPa)
-                        ).toFixed(1)}
-                      </span>
-                      <span>
-                        {(
-                          femResult.min_von_mises_MPa +
-                          0.75 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
-                        ).toFixed(1)}
-                      </span>
-                      <span style={{ color: "#dc2626" }}>{femResult.max_von_mises_MPa.toFixed(1)}</span>
-                    </div>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {[1, 50, 150, 300].map((preset) => (
+                      <button
+                        key={preset}
+                        onClick={() => setDeformScale(preset)}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          borderRadius: "5px",
+                          border: deformScale === preset ? "1px solid #0f766e" : "1px solid #cbd5e1",
+                          background: deformScale === preset ? "#ccfbf1" : "white",
+                          color: deformScale === preset ? "#0f766e" : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {preset === 1 ? "1× True" : `${preset}×`}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* FEM 3D VIEWPORT */}
+              {/* FEM 3D VIEWPORT WITH CORNER STRESS & DEFORMATION HUD OVERLAYS */}
               <div
                 style={{
                   position: "relative",
@@ -804,7 +761,193 @@ export default function ColumnDesign() {
                 }}
               >
                 {femGeometry ? (
-                  <ColumnViewer geometry={femGeometry} loading={femLoading} />
+                  <>
+                    <ColumnViewer geometry={femGeometry} loading={femLoading} />
+
+                    {femResult && (
+                      <>
+                        {/* TOP-LEFT CORNER HUD: DEFORMATION & LOAD */}
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "14px",
+                            left: "14px",
+                            zIndex: 10,
+                            background: "rgba(15, 23, 42, 0.88)",
+                            backdropFilter: "blur(6px)",
+                            color: "white",
+                            padding: "12px 14px",
+                            borderRadius: "8px",
+                            border: "1px solid rgba(148, 163, 184, 0.28)",
+                            fontSize: "12px",
+                            lineHeight: 1.6,
+                            minWidth: "230px",
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "11px",
+                              letterSpacing: "0.06em",
+                              color: "#5eead4",
+                              textTransform: "uppercase",
+                              marginBottom: "6px",
+                            }}
+                          >
+                            3D FEA Deformation & Load
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Applied Load:</span>
+                            <strong>{form.Fac_Axial_Load} kN</strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Lateral Bending (δx):</span>
+                            <strong style={{ color: "#38bdf8" }}>
+                              {femResult.max_lateral_deflection_mm} mm
+                            </strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Axial Shortening (δy):</span>
+                            <strong style={{ color: "#38bdf8" }}>
+                              {femResult.max_axial_shortening_mm} mm
+                            </strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Resultant Max (|u|):</span>
+                            <strong>{femResult.max_displacement_mm} mm</strong>
+                          </div>
+                          <div
+                            style={{
+                              marginTop: "6px",
+                              paddingTop: "6px",
+                              borderTop: "1px solid rgba(148, 163, 184, 0.22)",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: "11px",
+                              color: "#94a3b8",
+                            }}
+                          >
+                            <span>Scale: {deformScale}×</span>
+                            <span>
+                              Plotted: {(femResult.max_displacement_mm * deformScale).toFixed(1)} mm
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* TOP-RIGHT CORNER HUD: VON MISES STRESS CONTOUR */}
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "14px",
+                            right: "14px",
+                            zIndex: 10,
+                            background: "rgba(15, 23, 42, 0.88)",
+                            backdropFilter: "blur(6px)",
+                            color: "white",
+                            padding: "12px 14px",
+                            borderRadius: "8px",
+                            border: "1px solid rgba(148, 163, 184, 0.28)",
+                            fontSize: "12px",
+                            minWidth: "215px",
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "11px",
+                              letterSpacing: "0.06em",
+                              color: "#fda4af",
+                              textTransform: "uppercase",
+                              marginBottom: "8px",
+                            }}
+                          >
+                            Von Mises Stress (MPa)
+                          </div>
+
+                          <div style={{ display: "flex", gap: "12px", alignItems: "stretch" }}>
+                            <div
+                              style={{
+                                width: "14px",
+                                height: "130px",
+                                borderRadius: "4px",
+                                background:
+                                  "linear-gradient(180deg, #ff0000 0%, #ffff00 25%, #00ff00 50%, #00ffff 75%, #0000ff 100%)",
+                                border: "1px solid rgba(255,255,255,0.45)",
+                              }}
+                            />
+
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                justifyContent: "space-between",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              <span style={{ color: "#f87171" }}>
+                                {femResult.max_von_mises_MPa.toFixed(1)} (Max)
+                              </span>
+                              <span style={{ color: "#facc15" }}>
+                                {(
+                                  femResult.min_von_mises_MPa +
+                                  0.75 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                ).toFixed(1)}
+                              </span>
+                              <span style={{ color: "#4ade80" }}>
+                                {(
+                                  0.5 *
+                                  (femResult.min_von_mises_MPa + femResult.max_von_mises_MPa)
+                                ).toFixed(1)}{" "}
+                                (Mid)
+                              </span>
+                              <span style={{ color: "#22d3ee" }}>
+                                {(
+                                  femResult.min_von_mises_MPa +
+                                  0.25 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                ).toFixed(1)}
+                              </span>
+                              <span style={{ color: "#60a5fa" }}>
+                                {femResult.min_von_mises_MPa.toFixed(1)} (Min)
+                              </span>
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: "8px",
+                              paddingTop: "6px",
+                              borderTop: "1px solid rgba(148, 163, 184, 0.22)",
+                              fontSize: "11px",
+                              color: "#cbd5e1",
+                            }}
+                          >
+                            <div>
+                              Axial + Bend:{" "}
+                              <strong>
+                                {femResult.nominal_axial_MPa} + {femResult.bending_stress_MPa} MPa
+                              </strong>
+                            </div>
+                            <div>
+                              Yield Ratio (fy=250):{" "}
+                              <strong
+                                style={{
+                                  color: femResult.yield_ratio > 0.85 ? "#f87171" : "#4ade80",
+                                }}
+                              >
+                                {(femResult.yield_ratio * 100).toFixed(1)}%
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </>
                 ) : (
                   <div
                     style={{
