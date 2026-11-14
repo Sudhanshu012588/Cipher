@@ -15,7 +15,7 @@ export default function ColumnViewer({ geometry, loading }: ColumnViewerProps) {
         <directionalLight position={[-5, 3, -5]} intensity={1} />
 
         {geometry && (
-          <Bounds fit clip observe margin={1.2}>
+          <Bounds fit clip margin={1.2}>
             <ColumnModel geometry={geometry} />
           </Bounds>
         )}

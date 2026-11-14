@@ -1,8 +1,5 @@
-
 // Imported Config, Types, Utilities, and Styles
-
-
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import axios from "axios";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -17,6 +14,17 @@ import type { DesignForm, DesignResult } from "../types";
 import { formatKey, formatValue } from "../utils";
 import { inputStyle, unitStyle, tabStyle } from "../styles";
 
+interface FemResult {
+  top_area_mm2: number;
+  max_displacement_mm: number;
+  min_von_mises_MPa: number;
+  max_von_mises_MPa: number;
+  avg_von_mises_MPa: number;
+  yield_ratio: number;
+  positions?: number[];
+  colors?: number[];
+}
+
 export default function Column() {
   const [form, setForm] = useState<DesignForm>({
     Length: 3,
@@ -25,12 +33,28 @@ export default function Column() {
     Sections: "I",
   });
 
-  const [result, setResult] = useState<DesignResult | null>(null);
-  const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [result, setResult] = useState<(DesignResult & { fem?: FemResult }) | null>(null);
+  const [stlGeometry, setStlGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [viewMode, setViewMode] = useState<"stl" | "fem">("stl");
   const [loading, setLoading] = useState(false);
   const [meshLoading, setMeshLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"model" | "report">("model");
+
+  // Build centered Three.js BufferGeometry with vertex RGB colors from FEM response
+  const femGeometry = useMemo(() => {
+    const fem = result?.fem;
+    if (!fem?.positions || !fem?.colors || fem.positions.length === 0) return null;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(fem.positions, 3));
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(fem.colors, 3));
+    geom.computeVertexNormals();
+    geom.center();
+    return geom;
+  }, [result]);
+
+  const activeGeometry = viewMode === "fem" && femGeometry ? femGeometry : stlGeometry;
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -48,10 +72,10 @@ export default function Column() {
       const loader = new STLLoader();
       const url = `${STL_URL}?t=${Date.now()}`;
       const loadedGeometry = await loader.loadAsync(url);
-      
+
       loadedGeometry.computeVertexNormals();
       loadedGeometry.center();
-      setGeometry(loadedGeometry);
+      setStlGeometry(loadedGeometry);
     } catch (e) {
       console.error("Failed to load Column.stl:", e);
       setError("Column design succeeded, but the 3D model could not be loaded.");
@@ -63,16 +87,17 @@ export default function Column() {
   const handleDesign = async () => {
     setLoading(true);
     setError(null);
-    setGeometry(null);
+    setStlGeometry(null);
 
     try {
-      const response = await axios.post<DesignResult>(DESIGN_URL, form, {
+      const response = await axios.post<DesignResult & { fem?: FemResult }>(DESIGN_URL, form, {
         headers: { "Content-Type": "application/json" },
         timeout: 120000,
       });
 
       setResult(response.data);
       await loadSTL();
+      setViewMode(response.data?.fem?.positions ? "fem" : "stl");
       setActiveTab("model");
     } catch (e: any) {
       console.error("Column design error:", e);
@@ -98,7 +123,8 @@ export default function Column() {
       Sections: "I",
     });
     setResult(null);
-    setGeometry(null);
+    setStlGeometry(null);
+    setViewMode("stl");
     setError(null);
   };
 
@@ -118,7 +144,7 @@ export default function Column() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "410px minmax(0, 1fr)", gap: "28px", padding: "36px 5%" }}>
-        
+
         {/* LEFT PANEL */}
         <div style={{ background: "white", border: "1px solid #dce3eb", borderRadius: "10px", overflow: "hidden", height: "fit-content" }}>
           <div style={{ padding: "24px", borderBottom: "1px solid #e2e7ed" }}>
@@ -192,9 +218,68 @@ export default function Column() {
 
           {activeTab === "model" && (
             <div style={{ padding: "24px" }}>
+              {/* View Mode Switcher (STL Geometry vs FEM Stress Heatmap) */}
+              {activeGeometry && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "12px" }}>
+                  <div style={{ display: "inline-flex", background: "#eef2f6", padding: "4px", borderRadius: "8px", border: "1px solid #dce3eb" }}>
+                    <button
+                      onClick={() => setViewMode("stl")}
+                      style={{
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "6px 14px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: viewMode === "stl" ? "white" : "transparent",
+                        color: viewMode === "stl" ? "#203047" : "#647894",
+                        boxShadow: viewMode === "stl" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      }}
+                    >
+                      Geometry (STL)
+                    </button>
+                    <button
+                      onClick={() => setViewMode("fem")}
+                      disabled={!femGeometry}
+                      style={{
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "6px 14px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: femGeometry ? "pointer" : "not-allowed",
+                        background: viewMode === "fem" ? "white" : "transparent",
+                        color: viewMode === "fem" ? "#ff4b0b" : "#647894",
+                        boxShadow: viewMode === "fem" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                        opacity: femGeometry ? 1 : 0.5,
+                      }}
+                    >
+                      FEM Von Mises Stress
+                    </button>
+                  </div>
+
+                  {/* Stress Legend Bar when FEM Heatmap is active */}
+                  {viewMode === "fem" && result?.fem && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", color: "#34455d" }}>
+                      <span style={{ fontWeight: 600 }}>{result.fem.min_von_mises_MPa} MPa</span>
+                      <div
+                        style={{
+                          width: "140px",
+                          height: "10px",
+                          borderRadius: "999px",
+                          background: "linear-gradient(90deg, #0000ff 0%, #00ffff 25%, #00ff00 50%, #ffff00 75%, #ff0000 100%)",
+                          border: "1px solid #cbd5e1",
+                        }}
+                      />
+                      <span style={{ fontWeight: 600 }}>{result.fem.max_von_mises_MPa} MPa</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{ position: "relative", height: "650px", background: "#f5f7f9", border: "1px solid #e1e6ec", borderRadius: "8px", overflow: "hidden" }}>
-                {geometry ? (
-                  <ColumnViewer geometry={geometry} loading={meshLoading} />
+                {activeGeometry ? (
+                  <ColumnViewer geometry={activeGeometry} loading={meshLoading} />
                 ) : (
                   <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#61758e" }}>
                     <div style={{ fontSize: "42px", marginBottom: "14px", opacity: 0.45 }}>◇</div>
@@ -203,6 +288,30 @@ export default function Column() {
                   </div>
                 )}
               </div>
+
+              {/* Compact FEM Summary Strip below 3D Canvas */}
+              {result?.fem && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "12px", marginTop: "16px" }}>
+                  <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "12px 16px", background: "#fafbfc" }}>
+                    <div style={{ fontSize: "12px", color: "#71839a" }}>Max Von Mises Stress (FEM)</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700, color: "#203047", marginTop: "4px" }}>
+                      {result.fem.max_von_mises_MPa} MPa
+                    </div>
+                  </div>
+                  <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "12px 16px", background: "#fafbfc" }}>
+                    <div style={{ fontSize: "12px", color: "#71839a" }}>Max Axial Shortening</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700, color: "#203047", marginTop: "4px" }}>
+                      {result.fem.max_displacement_mm} mm
+                    </div>
+                  </div>
+                  <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "12px 16px", background: "#fafbfc" }}>
+                    <div style={{ fontSize: "12px", color: "#71839a" }}>Material Yield Ratio (σ / fy)</div>
+                    <div style={{ fontSize: "16px", fontWeight: 700, color: "#203047", marginTop: "4px" }}>
+                      {result.fem.yield_ratio}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -212,10 +321,10 @@ export default function Column() {
                 <div style={{ textAlign: "center", padding: "80px 20px", color: "#687b92" }}>Run the column design to generate the report.</div>
               ) : (
                 <>
-                  <h2 style={{ marginTop: 0, color: "#203047" }}>Column Design Report</h2>
+                  <h2 style={{ marginTop: 0, color: "#203047" }}>Column Design Report (IS 800)</h2>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "12px" }}>
                     {Object.entries(result)
-                      .filter(([key]) => key !== "mesh_url" && key !== "mesh_file" && key !== "stl_url" && key !== "stl_file")
+                      .filter(([key]) => !["mesh_url", "mesh_file", "stl_url", "stl_file", "fem"].includes(key))
                       .map(([key, value]) => (
                         <div key={key} style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "14px" }}>
                           <div style={{ fontSize: "12px", color: "#71839a", marginBottom: "5px" }}>{formatKey(key)}</div>
@@ -223,6 +332,30 @@ export default function Column() {
                         </div>
                       ))}
                   </div>
+
+                  {result.fem && (
+                    <>
+                      <h3 style={{ marginTop: "28px", marginBottom: "12px", color: "#203047" }}>3D Finite Element Verification (Ferrite.jl)</h3>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "12px" }}>
+                        <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "14px" }}>
+                          <div style={{ fontSize: "12px", color: "#71839a", marginBottom: "5px" }}>Max Von Mises Stress</div>
+                          <div style={{ fontWeight: 600, color: "#203047" }}>{result.fem.max_von_mises_MPa} MPa</div>
+                        </div>
+                        <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "14px" }}>
+                          <div style={{ fontSize: "12px", color: "#71839a", marginBottom: "5px" }}>Average Von Mises Stress</div>
+                          <div style={{ fontWeight: 600, color: "#203047" }}>{result.fem.avg_von_mises_MPa} MPa</div>
+                        </div>
+                        <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "14px" }}>
+                          <div style={{ fontSize: "12px", color: "#71839a", marginBottom: "5px" }}>Max Axial Shortening</div>
+                          <div style={{ fontWeight: 600, color: "#203047" }}>{result.fem.max_displacement_mm} mm</div>
+                        </div>
+                        <div style={{ border: "1px solid #e1e6ec", borderRadius: "7px", padding: "14px" }}>
+                          <div style={{ fontSize: "12px", color: "#71839a", marginBottom: "5px" }}>Material Yield Ratio</div>
+                          <div style={{ fontWeight: 600, color: "#203047" }}>{result.fem.yield_ratio}</div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
