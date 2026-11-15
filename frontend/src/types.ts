@@ -29,3 +29,12 @@ export interface BeamFEMViewerProps {
   loading: boolean;
 }
 
+export interface LacingModelProps {
+  geometry: THREE.BufferGeometry;
+}
+
+export interface LacingViewerProps {
+  geometry: THREE.BufferGeometry | null;
+  loading: boolean;
+}
+

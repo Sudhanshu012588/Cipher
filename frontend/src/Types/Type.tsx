@@ -112,3 +112,70 @@ export interface BeamDesignResult {
   error?: string;
   message?: string;
 }
+
+export interface LacingDesignForm {
+  Length: number;       // m — unsupported column length
+  Fac_Axial_Load: number;  // kN — factored axial load
+  Boundary_Condition: number; // 0=pinned, 1=fixed, 2=free, 3=fixed-pinned
+}
+
+export interface LacingDesignResult {
+  [key: string]: any;
+
+  Length_m?: number;
+  Effective_Length_m?: number;
+  Boundary_Condition?: string;
+
+  Chord_Section?: string;
+  Chord_Depth_mm?: number;
+  Chord_Width_mm?: number;
+
+  Total_Area_mm2?: number;
+  Channel_Spacing_mm?: number;
+  I_xx_cm4?: number;
+  I_yy_cm4?: number;
+  r_xx_mm?: number;
+  r_yy_mm?: number;
+
+  lambda_max?: number;
+  modified_slenderness?: number;
+  f_cd_MPa?: number;
+
+  Design_Capacity_kN?: number;
+  Capacity_Utilization?: number;
+  Status?: string;
+
+  Num_Lacing_Panels?: number;
+  Lacing_Angle_deg?: number;
+  Provided_Lacing_Diameter_mm?: number;
+  Lacing_Bar_Width_mm?: number;
+  Lacing_Slenderness_Check?: string;
+
+  mesh_file?: string;
+  stl_file?: string;
+  mesh_url?: string;
+  stl_url?: string;
+
+  error?: string;
+  message?: string;
+}
+
+export interface LacingFemResult {
+  max_deflection_mm: number;
+  max_downward_deflection: number;
+  max_lateral_deflection: number;
+  nominal_axial_MPa: number;
+  bending_stress_MPa: number;
+  min_von_mises_MPa: number;
+  max_von_mises_MPa: number;
+  avg_von_mises_MPa: number;
+  yield_ratio: number;
+  boundary_condition_label: string;
+  euler_buckling_kN: number;
+  p_delta_amplification: number;
+  mesh_nodes: number;
+  mesh_elements: number;
+  positions: number[];
+  displacements: number[];
+  colors: number[];
+}
