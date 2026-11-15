@@ -3,11 +3,11 @@ import { Settings } from "lucide-react";
 
 const Navbar = () => {
   return (
-    <header className="h-[68px] bg-[#111a24] text-white border-b border-slate-700">
+    <header className="h-17 bg-[#111a24] text-white border-b border-slate-700">
       <div className="h-full px-8 flex items-center">
 
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-3 min-w-[260px]">
+        <Link to="/" className="flex items-center gap-3 min-w-65">
 
           <div className="h-9 w-9 rounded-md bg-orange-600 flex items-center justify-center font-bold text-lg">
             S

@@ -2,181 +2,156 @@ module LacingMesh
 
 using Gmsh
 
-export create_lacing_column_mesh
+export create_lacing_column_mesh, END_PLATE_MM
+
+# Base / cap plate thickness. Must match `end_plate_m` in FEM_Lacing.jl (20 mm = 0.020 m).
+const END_PLATE_MM = 20.0
 
 """
-    create_lacing_column_mesh(result; output_file, stl_file)
+    create_lacing_column_mesh(result; output_file, stl_file, mesh_size_mm)
 
-Generate a 3D tetrahedral mesh for a built-up lacing column.
-Geometry: two channel chords (back-to-back with spacing) + diagonal flat-bar lacing bars.
-Creates named Physical Groups for FEM boundary conditions.
+Builds a conformal tetrahedral mesh of the laced column returned by `Design_Lacing_Column`.
+
+Coordinates (metres): X across the two chords, Y = column axis (0 … L), Z = channel depth.
+Parts, all fragmented with the OpenCASCADE kernel so touching faces share nodes:
+  * two ISMC chords (web + two flanges each), back-to-back, clear gap s, flanges outward
+  * single zig-zag flat-bar lacing on both flange faces (z = ±h/2)
+  * end tie plates on both flange faces
+  * a base plate and a cap plate under/over the whole section (load/support plates)
+
+Physical groups: steel_volume, bottom_face (outer face of base plate), top_face (outer face of
+cap plate), outer_surface (remaining outside skin, used for the STL).
 """
-function create_lacing_column_mesh(result; output_file = "LacingColumn.msh", stl_file = "LacingColumn.stl")
+function create_lacing_column_mesh(result;
+        output_file = "LacingColumn.msh",
+        stl_file = "LacingColumn.stl",
+        mesh_size_mm = nothing)
 
-    L   = Float64(result["Length_m"])
-    s   = Float64(result["Channel_Spacing_mm"]) / 1000.0   # spacing between channels (m)
-    h_c = Float64(result["Chord_Depth_mm"]) / 1000.0       # channel depth D (m)
-    b_f = Float64(result["Chord_Width_mm"]) / 1000.0        # channel width B (m)
-    t_f = Float64("tf_mm") isa AbstractString ? Float64(get(result, "tf_mm", 9.2)) / 1000.0 : h_c * 0.057
-    t_w = Float64(get(result, "tw_mm", 6.2)) / 1000.0       # channel web thickness
+    haskey(result, "error") && error("Cannot mesh a failed design: $(result["error"])")
 
-    # Fallback: estimate from standard ISMC dimensions
-    if t_f <= 0 || t_w <= 0
-        t_f = h_c * 0.057
-        t_w = h_c * 0.037
-    end
+    mm(key) = Float64(result[key]) / 1000.0
+    L     = Float64(result["Length_m"])          # metres
+    s     = mm("Channel_Spacing_mm")
+    h_c   = mm("Chord_Depth_mm")
+    b_f   = mm("Chord_Width_mm")
+    t_f   = mm("tf_mm")
+    t_w   = mm("tw_mm")
+    n     = Int(result["Num_Lacing_Panels"])
+    y0    = mm("Lacing_Start_mm")
+    w_lac = mm("Lacing_Bar_Width_mm")
+    t_lac = mm("Lacing_Bar_Thickness_mm")
+    tie_len = mm("Tie_Plate_Length_mm")
+    tie_t   = mm("Tie_Plate_Thickness_mm")
+    t_bp    = END_PLATE_MM / 1000.0
 
-    num_panels = Int(get(result, "Num_Lacing_Panels", max(2, round(Int, ceil(L / 2.5)))))
-    panel_len  = L / num_panels                             # m — panel length along column
-    d_lac_prov = Float64(get(result, "Provided_Lacing_Diameter_mm", 16)) / 1000.0  # lacing bar dia (m)
+    X  = s / 2 + b_f                  # half overall width
+    Zp = h_c / 2 + tie_t              # half depth of base/cap plates (covers tie plates)
+    x_bolt = s / 2 + b_f / 2          # lacing bolt line on each chord (mid-flange)
+    a = (L - 2 * y0) / n              # axial advance per panel
 
-    h_mesh = min(0.25, s * 0.3)                             # characteristic mesh size
-    h_mesh = max(h_mesh, 0.005)
+    h_mesh = mesh_size_mm === nothing ? clamp(min(b_f / 3, h_c / 6), 0.015, 0.04) : mesh_size_mm / 1000.0
 
     gmsh.initialize()
     try
+        gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("LacingColumn")
+        occ = gmsh.model.occ
 
-        # ── Channel cross-section in X-Z plane at Y = 0 (extruded along Y-axis for column length) ──
-        z_left       = -b_f / 2
-        z_right      =  b_f / 2
-        z_web_l      = -t_w / 2
-        z_web_r      =  t_w / 2
-
-        # Points defining one ISMC channel in X-Z plane
-        pts = [
-            gmsh.model.geo.addPoint(0, 0,       z_left,     h_mesh),   # 1: bottom-left flange tip
-            gmsh.model.geo.addPoint(0, 0,       z_right,    h_mesh),   # 2: bottom-right flange tip
-            gmsh.model.geo.addPoint(0, t_f,     z_right,    h_mesh),   # 3: bottom flange-web junction (R)
-            gmsh.model.geo.addPoint(0, t_f,     z_web_r,    h_mesh),   # 4
-            gmsh.model.geo.addPoint(0, h_c-t_f, z_web_r,    h_mesh),   # 5: top flange-web junction (R)
-            gmsh.model.geo.addPoint(0, h_c-t_f, z_right,    h_mesh),   # 6
-            gmsh.model.geo.addPoint(0, h_c,     z_right,    h_mesh),   # 7: top-right flange tip
-            gmsh.model.geo.addPoint(0, h_c,     z_left,     h_mesh),   # 8: top-left flange tip
-            gmsh.model.geo.addPoint(0, h_c-t_f, z_left,     h_mesh),   # 9
-            gmsh.model.geo.addPoint(0, h_c-t_f, z_web_l,    h_mesh),   # 10
-            gmsh.model.geo.addPoint(0, t_f,     z_web_l,    h_mesh),   # 11
-            gmsh.model.geo.addPoint(0, t_f,     z_left,     h_mesh),   # 12
-        ]
-
-        lines_tags = [
-            gmsh.model.geo.addLine(pts[1], pts[2]),
-            gmsh.model.geo.addLine(pts[2], pts[3]),
-            gmsh.model.geo.addLine(pts[3], pts[4]),
-            gmsh.model.geo.addLine(pts[4], pts[5]),
-            gmsh.model.geo.addLine(pts[5], pts[6]),
-            gmsh.model.geo.addLine(pts[6], pts[7]),
-            gmsh.model.geo.addLine(pts[7], pts[8]),
-            gmsh.model.geo.addLine(pts[8], pts[9]),
-            gmsh.model.geo.addLine(pts[9], pts[10]),
-            gmsh.model.geo.addLine(pts[10], pts[11]),
-            gmsh.model.geo.addLine(pts[11], pts[12]),
-            gmsh.model.geo.addLine(pts[12], pts[1]),
-        ]
-
-        curve_loop = gmsh.model.geo.addCurveLoop(lines_tags)
-        ch_surface = gmsh.model.geo.addPlaneSurface([curve_loop])
-
-        gmsh.model.geo.synchronize()
-
-        # ── Extrude along Y-axis (column length L) ───────────────────
-        out = gmsh.model.geo.extrude([(2, ch_surface)], 0, L, 0, [20], [1.0], false)
-        gmsh.model.geo.synchronize()
-
-        vol_tag    = out[3][2]
-        bottom_f   = out[1][2]      # face at Y=0 (bottom end)
-        top_f      = out[2][2]      # face at Y=L (top end)
-
-        # ── Lacing bars (diagonal flat bars between the two channels) ──
-        # Channel 1 centered at Z = -s/2, Channel 2 centered at Z = +s/2
-        # Each lacing bar is a thin rectangular plate spanning panel diagonally
-        lac_thickness = d_lac_prov / 2       # approximating flat bar thickness
-        lac_width = max(d_lac_prov * 1.5, 0.03)   # width of lacing bar
-
-        # Left face at Z = -s/2 + ... and right face at Z = +s/2 + ...
-        z_ch1_center = -s / 2                  # channel 1 centroid Z
-        z_ch2_center =  s / 2                  # channel 2 centroid Z
-
-        lac_surfaces = Int[]
-        panel_centers_y = Float64[]
-
-        for i in 0:num_panels-1
-            y_start = i * panel_len + L / num_panels / 2   # center of panel i+1
-            push!(panel_centers_y, y_start)
-
-            # Diagonal from channel 1 (bottom of web) at left face to channel 2 (top of web) at right face
-            z_web_outer_ch1 = z_ch1_center + t_w/2    # outward face of channel 1 web
-            z_top_ch2       = z_ch2_center + h_c/2     # top flange of channel 2
-
-            # Create lacing bar as a thin surface (extruded thin rectangle)
-            p_la1 = gmsh.model.geo.addPoint(z_web_outer_ch1, y_start - panel_len/2, 0.0, lac_thickness)
-            p_la2 = gmsh.model.geo.addPoint(z_web_outer_ch1, y_start - panel_len/2, lac_width, lac_thickness)
-            p_la3 = gmsh.model.geo.addPoint(z_top_ch2,       y_start + panel_len/2, lac_width, lac_thickness)
-            p_la4 = gmsh.model.geo.addPoint(z_top_ch2,       y_start + panel_len/2, 0.0,     lac_thickness)
-
-            l1 = gmsh.model.geo.addLine(p_la1, p_la2)
-            l2 = gmsh.model.geo.addLine(p_la2, p_la3)
-            l3 = gmsh.model.geo.addLine(p_la3, p_la4)
-            l4 = gmsh.model.geo.addLine(p_la4, p_la1)
-
-            lac_curve_loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
-            lac_surf = gmsh.model.geo.addPlaneSurface([lac_curve_loop])
-            push!(lac_surfaces, lac_surf)
-
-            # Mirror for opposite-direction diagonal in next panel (optional — alternate diagonal pattern)
+        objs = Tuple{Cint,Cint}[]
+        function box!(x0, y0_, z0, dx, dy, dz)
+            tag = occ.addBox(x0, y0_, z0, dx, dy, dz)
+            push!(objs, (3, tag))
+            return tag
         end
 
-        # ── Add Physical Groups for FEM boundary conditions ────────────
-        # For built-up column: clamp bottom face, roller at top face
-        gmsh.model.addPhysicalGroup(3, [vol_tag], -1, "steel_volume")
-        gmsh.model.addPhysicalGroup(2, [bottom_f], -1, "bottom_face")
-        gmsh.model.addPhysicalGroup(2, [top_f], -1, "top_face")
-
-        # Also tag channel 1 and channel 2 faces for identification
-        side_surfaces = Int[]
-        for item in out[3:end]
-            if item[1] == 2
-                push!(side_surfaces, item[2])
+        # ── Chords: web + two flanges per channel (back-to-back) ─────────
+        for dir in (-1.0, 1.0)
+            x_back = dir * s / 2
+            x_web  = dir * (s / 2 + t_w)
+            x_tip  = dir * (s / 2 + b_f)
+            box!(min(x_back, x_web), 0.0, -h_c / 2, abs(x_web - x_back), L, h_c)
+            for zs in (-1.0, 1.0)
+                z0 = zs > 0 ? h_c / 2 - t_f : -h_c / 2
+                box!(min(x_web, x_tip), 0.0, z0, abs(x_tip - x_web), L, t_f)
             end
         end
 
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMin", h_mesh)
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMax", h_mesh)
+        # ── Base and cap plates ──────────────────────────────────────────
+        box!(-X, -t_bp, -Zp, 2X, t_bp, 2Zp)
+        box!(-X, L, -Zp, 2X, t_bp, 2Zp)
+
+        # ── End tie plates on both flange faces ──────────────────────────
+        for zs in (-1.0, 1.0)
+            z0 = zs > 0 ? h_c / 2 : -h_c / 2 - tie_t
+            box!(-X, 0.0, z0, 2X, tie_len, tie_t)
+            box!(-X, L - tie_len, z0, 2X, tie_len, tie_t)
+        end
+
+        # ── Single (zig-zag) lacing on both flange faces ─────────────────
+        for zs in (-1.0, 1.0)
+            z0 = zs > 0 ? h_c / 2 : -h_c / 2 - t_lac
+            for p in 0:(n - 1)
+                ya = y0 + p * a
+                yb = ya + a
+                xa, xb = iseven(p) ? (-x_bolt, x_bolt) : (x_bolt, -x_bolt)
+                len = hypot(xb - xa, yb - ya)
+                phi = atan(yb - ya, xb - xa)
+                # bar axis runs bolt-to-bolt; ends extend w/2 past each bolt centre
+                tag = occ.addBox(xa - w_lac / 2, ya - w_lac / 2, z0, len + w_lac, w_lac, t_lac)
+                occ.rotate(Tuple{Cint,Cint}[(3, tag)], xa, ya, 0.0, 0.0, 0.0, 1.0, phi)
+                push!(objs, (3, tag))
+            end
+        end
+
+        # ── Make everything conformal ────────────────────────────────────
+        occ.fragment(objs, Tuple{Cint,Cint}[])
+        occ.synchronize()
+
+        vols = [t for (_, t) in gmsh.model.getEntities(3)]
+        isempty(vols) && error("Geometry produced no volumes")
+
+        # ── Physical groups ──────────────────────────────────────────────
+        tol = 1e-4
+        bot = [t for (_, t) in gmsh.model.getEntitiesInBoundingBox(-1.0, -t_bp - tol, -1.0, 1.0, -t_bp + tol, 1.0, 2)]
+        top = [t for (_, t) in gmsh.model.getEntitiesInBoundingBox(-1.0, L + t_bp - tol, -1.0, 1.0, L + t_bp + tol, 1.0, 2)]
+        (isempty(bot) || isempty(top)) && error("Could not locate base/cap plate outer faces")
+
+        skin  = [t for (_, t) in gmsh.model.getBoundary(Tuple{Cint,Cint}[(3, v) for v in vols], true, false, false)]
+        outer = setdiff(skin, bot, top)
+
+        gmsh.model.addPhysicalGroup(3, vols, -1, "steel_volume")
+        gmsh.model.addPhysicalGroup(2, bot, -1, "bottom_face")
+        gmsh.model.addPhysicalGroup(2, top, -1, "top_face")
+        gmsh.model.addPhysicalGroup(2, outer, -1, "outer_surface")
+
+        # ── Mesh ─────────────────────────────────────────────────────────
+        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", 0.4 * h_mesh)
+        gmsh.option.setNumber("Mesh.MeshSizeMax", h_mesh)
         gmsh.option.setNumber("Mesh.Algorithm3D", 1)
-
-        # Add lacing bars as separate volume (extrude thin surfaces to flat bars)
-        lac_volumes = Int[]
-        for i in 1:length(lac_surfaces)
-            lac_vol = gmsh.model.geo.extrude([(2, lac_surfaces[i])], 0.0, 0.0, lac_thickness * 0.999, [5], [0.05])
-            if !isempty(lac_vol) && length(lac_vol) >= 4
-                push!(lac_volumes, lac_vol[3][2])  # volume tag
-            end
-        end
-
-        gmsh.model.geo.synchronize()
-
+        gmsh.option.setNumber("Mesh.MshFileVersion", 4.1)
         gmsh.model.mesh.generate(3)
 
         gmsh.write(output_file)
-        gmsh.write(stl_file)
+        gmsh.write(stl_file)          # only physical surface groups are written -> outside skin
 
-        @info "Lacing column mesh: $(output_file)"
-        @info "Mesh written to $(stl_file)"
-
+        @info "Lacing column mesh written" output_file stl_file volumes = length(vols)
     finally
         gmsh.finalize()
     end
 
     return Dict(
-        "success"     => true,
-        "mesh_file"   => output_file,
-        "stl_file"    => stl_file,
-        "mesh_url"    => "/design/lacing/mesh",
-        "stl_url"     => "/design/lacing/stl",
-        "length_m"    => L,
-        "channel_spacing_mm" => s * 1000,
-        "num_panels"  => num_panels,
-        "lacing_diameter_mm"=> d_lac_prov * 1000,
+        "success"            => true,
+        "mesh_file"          => output_file,
+        "stl_file"           => stl_file,
+        "mesh_url"           => "/design/lacing/mesh",
+        "stl_url"            => "/design/lacing/stl",
+        "length_m"           => L,
+        "channel_spacing_mm" => s * 1000.0,
+        "num_panels"         => n,
+        "end_plate_mm"       => END_PLATE_MM,
     )
 end
 
