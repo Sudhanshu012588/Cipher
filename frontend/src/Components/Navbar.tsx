@@ -1,6 +1,4 @@
 import { Link } from "react-router";
-import { Settings } from "lucide-react";
-
 const Navbar = () => {
   return (
     <header className="h-[68px] bg-[#111a24] text-white border-b border-slate-700">
@@ -37,41 +35,21 @@ const Navbar = () => {
           </Link>
 
           <Link
-            to="/projects"
+            to="/column"
             className="h-full px-5 flex items-center text-sm text-slate-400 hover:text-white transition"
           >
-            Projects
+            Column
           </Link>
 
           <Link
-            to="/design"
+            to="/beam"
             className="h-full px-5 flex items-center text-sm text-slate-400 hover:text-white transition"
           >
-            Design
-          </Link>
-
-          <Link
-            to="/reports"
-            className="h-full px-5 flex items-center text-sm text-slate-400 hover:text-white transition"
-          >
-            Reports
+            Beam
           </Link>
 
         </nav>
 
-
-        {/* Right side */}
-        <div className="ml-auto flex items-center gap-5">
-
-          <button className="text-slate-400 hover:text-white transition">
-            <Settings size={18} />
-          </button>
-
-          <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-semibold">
-            SJ
-          </div>
-
-        </div>
 
       </div>
     </header>
