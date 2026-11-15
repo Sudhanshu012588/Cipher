@@ -4,6 +4,50 @@ using Ferrite, FerriteGmsh, SparseArrays, LinearAlgebra
 
 export run_beam_fem
 
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+"""Mean coordinate (component `d`) of a facet's quadrature points."""
+function facet_center(fv, facet, d::Int)
+    reinit!(fv, facet)
+    nq = getnquadpoints(fv)
+    X = getcoordinates(facet)
+    return sum(spatial_coordinate(fv, q, X)[d] for q in 1:nq) / nq
+end
+
+"""Total area of a collection of facets."""
+function facets_area(dh, fv, facets)
+    area = 0.0
+    for facet in FacetIterator(dh, facets)
+        reinit!(fv, facet)
+        for q in 1:getnquadpoints(fv)
+            area += getdetJdV(fv, q)
+        end
+    end
+    return area
+end
+
+"""
+Integrate a constant traction over `facets` and add it DIRECTLY into the
+global load vector `f`  (vector assembly: `assemble!(f, dofs, fe)`).
+"""
+function add_traction!(f::Vector{Float64}, dh, fv, facets, traction::Vec{3,Float64},
+                       fe::Vector{Float64})
+    n_base = length(fe)
+    for facet in FacetIterator(dh, facets)
+        reinit!(fv, facet)
+        fill!(fe, 0.0)
+        for q in 1:getnquadpoints(fv)
+            dΓ = getdetJdV(fv, q)
+            for i in 1:n_base
+                δu_i = shape_value(fv, q, i)
+                fe[i] += (δu_i ⋅ traction) * dΓ
+            end
+        end
+        assemble!(f, celldofs(facet), fe)
+    end
+    return f
+end
+
 """
     run_beam_fem(msh_path, wu_kNm, Wu_kN, b1_mm; E_MPa, ν)
 
@@ -58,7 +102,7 @@ function run_beam_fem(
     ch = ConstraintHandler(dh)
 
     left_set  = getfacetset(grid, "bottom_face")   # face at X=0 (left support end)
-    right_set = getfacetset(grid, "top_face")       # face at X=L (right support end)
+    right_set = getfacetset(grid, "top_face")      # face at X=L (right support end)
 
     if isempty(left_set) || isempty(right_set)
         error(
@@ -67,11 +111,11 @@ function run_beam_fem(
         )
     end
 
-    # Left pin: fix Y (2) + Z (3) → allows rotation about X axis
-    add!(ch, Dirichlet(:u, left_set, (x, t) -> [0.0, 0.0], [2, 3]))
+    # Left pin: fix X (1) + Y (2) + Z (3) to prevent rigid-body X drift
+    add!(ch, Dirichlet(:u, left_set, (x, t) -> [0.0, 0.0, 0.0], [1, 2, 3]))
 
-    # Right roller: fix only Y (2) → allows axial slip in X + rotation
-    add!(ch, Dirichlet(:u, right_set, (x, t) -> [0.0], [2]))
+    # Right roller: fix only Y (2) + Z (3) → allows axial slip in X + bending rotation
+    add!(ch, Dirichlet(:u, right_set, (x, t) -> [0.0, 0.0], [2, 3]))
 
     close!(ch)
 
@@ -87,87 +131,111 @@ function run_beam_fem(
 
     for facet in FacetIterator(dh, left_set)
         reinit!(fv, facet)
+        X = getcoordinates(facet)
         for q in 1:getnquadpoints(fv)
             dΓ = getdetJdV(fv, q)
-            x_q = spatial_coordinate(fv, q, getcoordinates(facet))
+            x_q = spatial_coordinate(fv, q, X)
             left_area_m2 += dΓ
-            I_strong_m4 += ((x_q[2] - y_mid)^2) * dΓ   # ∫(y - y_mid)² dA
+            I_strong_m4  += ((x_q[2] - y_mid)^2) * dΓ   # ∫(y - y_mid)² dA
         end
     end
 
     @info "Beam section: A=$(left_area_m2) m², I_strong=$(I_strong_m4) m^4"
 
-    # ── 6. Assemble K and f ──────────────────────────────────────────────
+    # ── 6. Assemble global stiffness K across ALL elements ───────────────
     K = allocate_matrix(dh)
     f = zeros(ndofs(dh))
-    assembler = start_assemble(K, f)
+    assembler = start_assemble(K)          # matrix assembler ONLY (Ke)
     n_base = getnbasefunctions(cv)
     Ke = zeros(n_base, n_base)
-    fe_vol = zeros(n_base)
+    fe = zeros(n_base)
+
+    for cell in CellIterator(dh)
+        reinit!(cv, cell)
+        fill!(Ke, 0.0)
+        for q in 1:getnquadpoints(cv)
+            dΩ = getdetJdV(cv, q)
+            for i in 1:n_base
+                δε_i = shape_symmetric_gradient(cv, q, i)
+                for j in 1:n_base
+                    δε_j = shape_symmetric_gradient(cv, q, j)
+                    Ke[i, j] += (δε_i ⊡ C ⊡ δε_j) * dΩ
+                end
+            end
+        end
+        assemble!(assembler, celldofs(cell), Ke)
+    end
 
     # Convert loads to SI units
     w_Nm = wu_kNm * 1000.0      # UDL in N/m (downward, -Y direction)
     P_N  = Wu_kN * 1000.0       # Point load at mid-span in N
 
-    # ── 7. Apply distributed load as traction on top face (y ≈ y_max) ────
-    for facet in FacetIterator(dh)
-        reinit!(fv, facet)
-        center_y = zero(Float64)
-        np = 0
-        for q in 1:getnquadpoints(fv)
-            xp = spatial_coordinate(fv, q, getcoordinates(facet))
-            center_y += xp[2]
-            np += 1
+    # ── 7. Find exterior boundary facets (faces belonging to only 1 tet) ─
+    facet_counts = Dict{NTuple{3, Int}, Int}()
+    for cell in grid.cells
+        for f_nodes in Ferrite.facets(cell)
+            key = Tuple(sort(collect(f_nodes)))
+            facet_counts[key] = get(facet_counts, key, 0) + 1
         end
-        center_y /= np
+    end
 
-        # Top face: y ≈ y_max (top of beam flange/web)
-        if abs(center_y - y_max) < D_sec * 0.05
-            for q in 1:getnquadpoints(fv)
-                dΓ = getdetJdV(fv, q)
-                traction = Vec((0.0, -w_Nm / L_beam, 0.0))   # N/m² (force per unit face area)
-                for i in 1:n_base
-                    δu_i = shape_value(fv, q, i)
-                    fe_vol[i] += (δu_i ⋅ traction) * dΓ
-                end
+    boundary_facets = FacetIndex[]
+    for (cell_id, cell) in enumerate(grid.cells)
+        for (facet_id, f_nodes) in enumerate(Ferrite.facets(cell))
+            key = Tuple(sort(collect(f_nodes)))
+            if facet_counts[key] == 1
+                push!(boundary_facets, FacetIndex(cell_id, facet_id))
             end
         end
     end
 
-    # ── 8. Apply point load at mid-span on top surface as body force ─────
-    if Wu_kN > 0
-        bearing_span = max(min(b1_mm / 1000.0, L_beam * 0.05), L_beam * 0.005)
-        for cell in CellIterator(dh)
-            reinit!(cv, cell)
-            c = zero(Vec{3})
-            nq = getnquadpoints(cv)
-            vol_cell = zero(Float64)
-            for q in 1:nq
-                c += spatial_coordinate(cv, q, getcoordinates(cell))
-                vol_cell += getdetJdV(cv, q)
+    # Top-face facets (y ≈ y_max)
+    top_facets = FacetIndex[]
+    for (idx, facet) in enumerate(FacetIterator(dh, boundary_facets))
+        center_y = facet_center(fv, facet, 2)
+        if abs(center_y - y_max) < D_sec * 0.02
+            push!(top_facets, boundary_facets[idx])
+        end
+    end
+    top_area = facets_area(dh, fv, top_facets)
+
+    # ── 7a. Distributed load as traction on top face ─────────────────────
+    if w_Nm > 0.0 && top_area > 0.0
+        q_pa = (w_Nm * L_beam) / top_area   # N/m² uniform downward pressure
+        traction = Vec((0.0, -q_pa, 0.0))
+        add_traction!(f, dh, fv, top_facets, traction, fe)
+    end
+
+    # ── 8. Downward mid-span point load over bearing patch ───────────────
+    if P_N > 0.0 && top_area > 0.0
+        bearing_half = max(0.5 * (b1_mm / 1000.0), L_beam * 0.01)
+        patch_facets = FacetIndex[]
+
+        for (idx, facet) in enumerate(FacetIterator(dh, top_facets))
+            if abs(facet_center(fv, facet, 1) - x_mid) <= bearing_half
+                push!(patch_facets, top_facets[idx])
             end
-            c /= nq
+        end
 
-            if abs(c[1] - x_mid) < bearing_span * 3 && abs(c[2] - y_max) < D_sec * 0.3
-                share = max(0, 1.0 - abs(c[1] - x_mid) / (bearing_span * 3))
-                P_cell = P_N * share
-
-                fill!(Ke, 0.0)
-                fill!(fe_vol, 0.0)
-                for q in 1:nq
-                    dΩ = getdetJdV(cv, q)
-                    b_vec = Vec((0.0, P_cell / max(vol_cell, 1e-15), 0.0))   # N/m³
-                    for i in 1:n_base
-                        δu_i = shape_value(cv, q, i)
-                        fe_vol[i] += (δu_i ⋅ b_vec) * dΩ
-                        for j in 1:n_base
-                            δε_j = shape_symmetric_gradient(cv, q, j)
-                            Ke[i,j] += (shape_symmetric_gradient(cv, q, i) ⊡ C ⊡ δε_j) * dΩ
-                        end
-                    end
+        # Fallback to nearest top facet if mesh element size exceeds bearing_half
+        if isempty(patch_facets) && !isempty(top_facets)
+            best_f  = first(top_facets)
+            best_dx = Inf
+            for (idx, facet) in enumerate(FacetIterator(dh, top_facets))
+                dx = abs(facet_center(fv, facet, 1) - x_mid)
+                if dx < best_dx
+                    best_dx = dx
+                    best_f  = top_facets[idx]
                 end
-                assemble!(assembler, celldofs(cell), Ke, fe_vol)
             end
+            push!(patch_facets, best_f)
+        end
+
+        patch_area = facets_area(dh, fv, patch_facets)
+
+        if patch_area > 0.0
+            p_traction = Vec((0.0, -P_N / patch_area, 0.0))  # downward (-Y) N/m²
+            add_traction!(f, dh, fv, patch_facets, p_traction, fe)
         end
     end
 
