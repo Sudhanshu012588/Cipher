@@ -13,6 +13,10 @@ DotEnv.load!()
 include(joinpath(@__DIR__, "Column", "Logic_Column.jl"))
 include(joinpath(@__DIR__, "Column", "Mesh.jl"))
 include(joinpath(@__DIR__, "Report", "Report_LLM.jl"))
+include(joinpath(@__DIR__, "Beam", "Logic_Beam.jl"))
+include(joinpath(@__DIR__, "Beam", "Mesh.jl"))
+include(joinpath(@__DIR__, "Beam", "Report_Beam.jl"))
+
 include(joinpath(@__DIR__, "Column", "FEM_Column.jl"))
 using .FEMColumn
 
@@ -22,9 +26,13 @@ using .FEMColumn
 
 const BACKEND_DIR = @__DIR__
 const COLUMN_DIR = joinpath(BACKEND_DIR, "Column")
+const BEAM_DIR = joinpath(BACKEND_DIR, "Beam")
 
 const MESH_FILE = joinpath(COLUMN_DIR, "Column.msh")
 const STL_FILE = joinpath(COLUMN_DIR, "Column.stl")
+
+const BEAM_MESH_FILE = joinpath(BEAM_DIR, "Beam.msh")
+const BEAM_STL_FILE = joinpath(BEAM_DIR, "Beam.stl")
 
 
 # ============================================================
@@ -349,6 +357,253 @@ end
             )
         )
     end
+
+end
+
+
+# ============================================================
+# BEAM DESIGN
+# ============================================================
+
+@post "/design/beam" function(req::HTTP.Request)
+
+    try
+
+        body = JSON3.read(
+            String(req.body)
+        )
+
+
+        Span  = Float64(body.Span)
+        wu    = Float64(body.wu)
+        Wu    = Float64(body.Wu)
+        b1    = haskey(body, :b1) ? Float64(body.b1) : 100.0
+
+
+        println("==============================================")
+        println("BEAM DESIGN REQUEST")
+        println("Span                : ", Span, " m")
+        println("Factored UDL (wu)   : ", wu, " kN/m")
+        println("Factored Point Load : ", Wu, " kN")
+        println("Stiff Bearing (b1)  : ", b1, " mm")
+        println("==============================================")
+
+
+        result = Design_Beam(Span, wu, Wu, b1)
+
+
+        if haskey(result, "error")
+
+            println("Beam design failed:")
+            println(result)
+
+            return json_response(
+                400,
+                result
+            )
+
+        end
+
+
+        println("Beam design successful.")
+        println(
+            "Selected section: ",
+            result["Designation"]
+        )
+
+
+        # ----------------------------------------------------
+        # GENERATE BEAM MESH
+        # ----------------------------------------------------
+
+        println("Generating Gmsh mesh for beam...")
+
+        mesh_result = create_beam_mesh(
+            result;
+            output_file = BEAM_MESH_FILE,
+            stl_file = BEAM_STL_FILE
+        )
+
+        if haskey(mesh_result, "error")
+            println("Beam mesh generation failed:")
+            println(mesh_result["error"])
+
+            return json_response(
+                500,
+                Dict(
+                    "error" => "Beam design succeeded but mesh generation failed.",
+                    "message" => mesh_result["error"],
+                    "design" => result
+                )
+            )
+        end
+
+        println("Beam mesh generated successfully.")
+        println("MSH : ", BEAM_MESH_FILE)
+        println("STL : ", BEAM_STL_FILE)
+
+        result["mesh_file"] = mesh_result["mesh_file"]
+        result["stl_file"]  = mesh_result["stl_file"]
+        result["mesh_url"]  = mesh_result["mesh_url"]
+        result["stl_url"]   = mesh_result["stl_url"]
+
+        return json_response(
+            200,
+            result
+        )
+
+
+    catch e
+
+        @error "Beam design failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error"   => "Beam design failed.",
+                "message" => sprint(showerror, e)
+            )
+        )
+
+    end
+
+end
+
+
+# ============================================================
+# GET BEAM STL
+# ============================================================
+
+@get "/design/beam/stl" function(req::HTTP.Request)
+
+    try
+
+        if !isfile(BEAM_STL_FILE)
+
+            return json_response(
+                404,
+                Dict(
+                    "error" => "Beam.stl does not exist.",
+                    "path" => BEAM_STL_FILE
+                )
+            )
+
+        end
+
+        println("Serving Beam STL: ", BEAM_STL_FILE)
+
+        return HTTP.Response(
+            200,
+            [
+                "Content-Type" => "model/stl",
+                "Access-Control-Allow-Origin" => "*"
+            ],
+            read(BEAM_STL_FILE)
+        )
+
+    catch e
+
+        @error "Unable to read Beam STL" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error" => "Unable to read Beam.stl.",
+                "message" => sprint(showerror, e)
+            )
+        )
+
+    end
+
+end
+
+
+# ============================================================
+# GET BEAM MSH
+# ============================================================
+
+@get "/design/beam/mesh" function(req::HTTP.Request)
+
+    try
+
+        if !isfile(BEAM_MESH_FILE)
+
+            return json_response(
+                404,
+                Dict(
+                    "error" => "Beam.msh does not exist.",
+                    "path" => BEAM_MESH_FILE
+                )
+            )
+
+        end
+
+        println("Serving Beam MSH: ", BEAM_MESH_FILE)
+
+        return HTTP.Response(
+            200,
+            [
+                "Content-Type" => "application/octet-stream",
+                "Access-Control-Allow-Origin" => "*",
+                "Content-Disposition" => "inline; filename=\"Beam.msh\""
+            ],
+            read(BEAM_MESH_FILE)
+        )
+
+    catch e
+
+        @error "Unable to read Beam MSH" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error" => "Unable to read Beam.msh.",
+                "message" => sprint(showerror, e)
+            )
+        )
+
+    end
+
+end
+
+
+# ============================================================
+# BEAM LLM REPORT
+# ============================================================
+
+@post "/report/beam" function(req::HTTP.Request)
+
+    try
+
+        body = JSON3.read(
+            String(req.body)
+        )
+
+        Span = Float64(body.Span)
+        wu   = Float64(body.wu)
+        Wu   = Float64(body.Wu)
+        b1   = haskey(body, :b1) ? Float64(body.b1) : 100.0
+
+        return json_response(
+            200,
+            Generate_Beam_Report(Span, wu, Wu, b1)
+        )
+
+
+    catch e
+
+        @error "Beam report generation failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error"   => "Unable to generate beam report.",
+                "message" => sprint(showerror, e)
+            )
+        )
+
+    end
+
 end
 
 
@@ -387,7 +642,7 @@ end
 
 println()
 println("==============================================")
-println("       PROJECT CIPHER - COLUMN ENGINE")
+println("       PROJECT CIPHER - DESIGN ENGINE")
 println("==============================================")
 println()
 println("Server : http://127.0.0.1:8080")
@@ -399,6 +654,10 @@ println("  POST /fem/column")
 println("  GET  /design/column/stl")
 println("  GET  /design/column/mesh")
 println("  POST /report/column")
+println("  POST /design/beam")
+println("  GET  /design/beam/stl")
+println("  GET  /design/beam/mesh")
+println("  POST /report/beam")
 println()
 println("==============================================")
 println()
