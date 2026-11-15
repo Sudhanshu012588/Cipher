@@ -18,7 +18,9 @@ include(joinpath(@__DIR__, "Beam", "Mesh.jl"))
 include(joinpath(@__DIR__, "Beam", "Report_Beam.jl"))
 
 include(joinpath(@__DIR__, "Column", "FEM_Column.jl"))
+include(joinpath(@__DIR__, "Beam", "FEM_Beam.jl"))
 using .FEMColumn
+using .FEMBeam
 
 # ============================================================
 # PATHS
@@ -265,6 +267,59 @@ end
 
     catch e
         @error "FEM analysis failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error" => "3D FEM analysis failed.",
+                "message" => sprint(showerror, e)
+            )
+        )
+    end
+end
+
+
+# ============================================================
+# 3D FEM ANALYSIS FOR BEAM (ON-DEMAND)
+# ============================================================
+
+@post "/fem/beam" function(req::HTTP.Request)
+    try
+        body = JSON3.read(String(req.body))
+        wu_kNm = Float64(body.wu)
+        Wu_kN  = haskey(body, :Wu) ? Float64(body.Wu) : 0.0
+        b1_mm  = haskey(body, :b1) ? Float64(body.b1) : 100.0
+
+        if !isfile(BEAM_MESH_FILE)
+            return json_response(
+                400,
+                Dict(
+                    "error" => "Beam.msh not found. Run Beam Design first to generate the 3D mesh."
+                )
+            )
+        end
+
+        println("==============================================")
+        println("3D BEAM FEM ANALYSIS REQUEST")
+        println("Mesh File           : ", BEAM_MESH_FILE)
+        println("Factored UDL (wu)   : ", wu_kNm, " kN/m")
+        println("Factored Point Load : ", Wu_kN, " kN")
+        println("Stiff Bearing (b1)  : ", b1_mm, " mm")
+        println("==============================================")
+
+        fem_result = FEMBeam.run_beam_fem(
+            BEAM_MESH_FILE,
+            wu_kNm,
+            Wu_kN,
+            b1_mm
+        )
+
+        println("FEM completed. Max Von Mises: ", fem_result["max_von_mises_MPa"], " MPa")
+
+        return json_response(200, fem_result)
+
+    catch e
+        @error "Beam FEM analysis failed" exception=(e, catch_backtrace())
 
         return json_response(
             500,
