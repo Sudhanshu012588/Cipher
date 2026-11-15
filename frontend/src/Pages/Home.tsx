@@ -57,7 +57,7 @@ const Home = () => {
 <DesignCard
   icon={<Layers3 size={28} />}
   title="Lacing"
-  description="Design built-up columns with batten connections."
+  description="Design built-up columns with lacing connections."
   path="/lacing"
 />
 
