@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import Navbar from "../Components/Navbar";
 import ColumnViewer from "../Components/ColumnViewer";
-import { DESIGN_URL, STL_URL } from "../constants";
+import { COLUMN_REPORT_URL, DESIGN_URL, STL_URL } from "../constants";
 import type { DesignForm, DesignResult } from "../Types/Type";
 import ResultCard from "./ResultCard.tsx"
 import EngineeringReport from "../Components/EngineeringReport";
@@ -180,7 +180,7 @@ export default function ColumnDesign() {
 
       const response =
         await axios.post(
-          "http://127.0.0.1:8080/report/column",
+          COLUMN_REPORT_URL,
           form,
           {
             headers: {
