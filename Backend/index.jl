@@ -5,6 +5,7 @@ using CSV
 using DataFrames
 using Gmsh
 using DotEnv
+
 # ============================================================
 # INCLUDE PROJECT FILES
 # ============================================================
@@ -16,6 +17,8 @@ include(joinpath(@__DIR__, "Beam", "Logic_Beam.jl"))
 include(joinpath(@__DIR__, "Beam", "Mesh.jl"))
 include(joinpath(@__DIR__, "Beam", "Report_Beam.jl"))
 
+include(joinpath(@__DIR__, "Column", "FEM_Column.jl"))
+using .FEMColumn
 
 # ============================================================
 # PATHS
@@ -48,7 +51,6 @@ const CORS_HEADERS = [
 # ============================================================
 
 function json_response(status::Int, data)
-
     return HTTP.Response(
         status,
         [
@@ -57,7 +59,6 @@ function json_response(status::Int, data)
         ],
         JSON3.write(data)
     )
-
 end
 
 
@@ -66,37 +67,27 @@ end
 # ============================================================
 
 function cors_handler(handler)
-
     return function(req::HTTP.Request)
-
         try
-
             # Browser preflight request
             if req.method == "OPTIONS"
-
                 return HTTP.Response(
                     200,
                     CORS_HEADERS
                 )
-
             end
-
 
             # Execute Oxygen route
             response = handler(req)
-
 
             # Add CORS headers
             for header in CORS_HEADERS
                 HTTP.setheader(response, header)
             end
 
-
             return response
 
-
         catch e
-
             @error "Request failed" path=req.target exception=(e, catch_backtrace())
 
             return HTTP.Response(
@@ -108,11 +99,8 @@ function cors_handler(handler)
                     )
                 )
             )
-
         end
-
     end
-
 end
 
 
@@ -121,7 +109,6 @@ end
 # ============================================================
 
 @get "/health" function(req::HTTP.Request)
-
     return json_response(
         200,
         Dict(
@@ -129,7 +116,6 @@ end
             "service" => "Column Design Engine"
         )
     )
-
 end
 
 
@@ -138,33 +124,19 @@ end
 # ============================================================
 
 @post "/design/column" function(req::HTTP.Request)
-
     try
-
         # ----------------------------------------------------
         # Read request body
         # ----------------------------------------------------
-
-        body = JSON3.read(
-            String(req.body)
-        )
-
+        body = JSON3.read(String(req.body))
 
         # ----------------------------------------------------
         # Extract input parameters
         # ----------------------------------------------------
-
         Length = Float64(body.Length)
-
-        Fac_Axial_Load =
-            Float64(body.Fac_Axial_Load)
-
-        Boundary_Condition =
-            Int(body.Boundary_Condition)
-
-        Sections =
-            String(body.Sections)
-
+        Fac_Axial_Load = Float64(body.Fac_Axial_Load)
+        Boundary_Condition = Int(body.Boundary_Condition)
+        Sections = String(body.Sections)
 
         println("==============================================")
         println("COLUMN DESIGN REQUEST")
@@ -174,11 +146,9 @@ end
         println("Section Type        : ", Sections)
         println("==============================================")
 
-
         # ----------------------------------------------------
         # RUN COLUMN DESIGN
         # ----------------------------------------------------
-
         result = Design_Column(
             Length,
             Fac_Axial_Load,
@@ -186,37 +156,22 @@ end
             Sections
         )
 
-
         # ----------------------------------------------------
         # Check whether design failed
         # ----------------------------------------------------
-
         if haskey(result, "error")
-
             println("Column design failed:")
             println(result)
-
-            return json_response(
-                400,
-                result
-            )
-
+            return json_response(400, result)
         end
 
-
         println("Design successful.")
-        println(
-            "Selected section: ",
-            result["Designation"]
-        )
-
+        println("Selected section: ", result["Designation"])
 
         # ----------------------------------------------------
         # GENERATE MESH
         # ----------------------------------------------------
-
         println("Generating Gmsh mesh...")
-
 
         mesh_result = create_column_mesh(
             result;
@@ -224,91 +179,101 @@ end
             stl_file = STL_FILE
         )
 
-
         # ----------------------------------------------------
         # Check mesh generation
         # ----------------------------------------------------
-
         if haskey(mesh_result, "error")
-
-            println(
-                "Mesh generation failed:"
-            )
-
-            println(
-                mesh_result["error"]
-            )
-
+            println("Mesh generation failed:")
+            println(mesh_result["error"])
 
             return json_response(
                 500,
                 Dict(
-                    "error" =>
-                        "Column design succeeded but mesh generation failed.",
-
-                    "message" =>
-                        mesh_result["error"],
-
-                    "design" =>
-                        result
+                    "error" => "Column design succeeded but mesh generation failed.",
+                    "message" => mesh_result["error"],
+                    "design" => result
                 )
             )
-
         end
-
 
         println("Mesh generated successfully.")
         println("MSH : ", MESH_FILE)
         println("STL : ", STL_FILE)
 
-
         # ----------------------------------------------------
         # Add mesh information to design result
         # ----------------------------------------------------
-
-        result["mesh_file"] =
-            mesh_result["mesh_file"]
-
-        result["stl_file"] =
-            mesh_result["stl_file"]
-
-        result["mesh_url"] =
-            mesh_result["mesh_url"]
-
-        result["stl_url"] =
-            mesh_result["stl_url"]
-
+        result["mesh_file"] = mesh_result["mesh_file"]
+        result["stl_file"]  = mesh_result["stl_file"]
+        result["mesh_url"]  = mesh_result["mesh_url"]
+        result["stl_url"]   = mesh_result["stl_url"]
 
         # ----------------------------------------------------
         # Return final result
         # ----------------------------------------------------
-
-        return json_response(
-            200,
-            result
-        )
-
+        return json_response(200, result)
 
     catch e
-
         @error "Column design failed" exception=(e, catch_backtrace())
 
         return json_response(
             500,
             Dict(
-                "error" =>
-                    "Column design failed.",
-
-                "message" =>
-                    sprint(
-                        showerror,
-                        e
-                    )
+                "error" => "Column design failed.",
+                "message" => sprint(showerror, e)
             )
         )
-
     end
+end
 
+
+# ============================================================
+# 3D FEM ANALYSIS (ON-DEMAND)
+# ============================================================
+
+@post "/fem/column" function(req::HTTP.Request)
+    try
+        body = JSON3.read(String(req.body))
+        Fac_Axial_Load = Float64(body.Fac_Axial_Load)
+        Boundary_Condition = Int(body.Boundary_Condition)
+
+        if !isfile(MESH_FILE)
+            return json_response(
+                400,
+                Dict(
+                    "error" => "Column.msh not found. Run Column Design first to generate the 3D mesh."
+                )
+            )
+        end
+
+        println("==============================================")
+        println("3D FEM ANALYSIS REQUEST")
+        println("Mesh File           : ", MESH_FILE)
+        println("Factored Axial Load : ", Fac_Axial_Load, " kN")
+        println("Boundary Condition  : ", Boundary_Condition)
+        println("==============================================")
+
+        fem_result = FEMColumn.run_column_fem(
+            MESH_FILE,
+            Fac_Axial_Load,
+            Boundary_Condition
+        )
+
+        println("FEM completed. Max Von Mises: ", fem_result["max_von_mises_MPa"], " MPa")
+
+        return json_response(200, fem_result)
+
+    catch e
+        @error "FEM analysis failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error" => "3D FEM analysis failed.",
+                "message" => sprint(showerror, e)
+            )
+        )
+    end
 end
 
 
@@ -317,30 +282,18 @@ end
 # ============================================================
 
 @get "/design/column/stl" function(req::HTTP.Request)
-
     try
-
         if !isfile(STL_FILE)
-
             return json_response(
                 404,
                 Dict(
-                    "error" =>
-                        "Column.stl does not exist.",
-
-                    "path" =>
-                        STL_FILE
+                    "error" => "Column.stl does not exist.",
+                    "path" => STL_FILE
                 )
             )
-
         end
 
-
-        println(
-            "Serving STL: ",
-            STL_FILE
-        )
-
+        println("Serving STL: ", STL_FILE)
 
         return HTTP.Response(
             200,
@@ -351,27 +304,17 @@ end
             read(STL_FILE)
         )
 
-
     catch e
-
         @error "Unable to read STL" exception=(e, catch_backtrace())
 
         return json_response(
             500,
             Dict(
-                "error" =>
-                    "Unable to read Column.stl.",
-
-                "message" =>
-                    sprint(
-                        showerror,
-                        e
-                    )
+                "error" => "Unable to read Column.stl.",
+                "message" => sprint(showerror, e)
             )
         )
-
     end
-
 end
 
 
@@ -380,65 +323,39 @@ end
 # ============================================================
 
 @get "/design/column/mesh" function(req::HTTP.Request)
-
     try
-
         if !isfile(MESH_FILE)
-
             return json_response(
                 404,
                 Dict(
-                    "error" =>
-                        "Column.msh does not exist.",
-
-                    "path" =>
-                        MESH_FILE
+                    "error" => "Column.msh does not exist.",
+                    "path" => MESH_FILE
                 )
             )
-
         end
 
-
-        println(
-            "Serving MSH: ",
-            MESH_FILE
-        )
-
+        println("Serving MSH: ", MESH_FILE)
 
         return HTTP.Response(
             200,
             [
-                "Content-Type" =>
-                    "application/octet-stream",
-
-                "Access-Control-Allow-Origin" =>
-                    "*",
-
-                "Content-Disposition" =>
-                    "inline; filename=\"Column.msh\""
+                "Content-Type" => "application/octet-stream",
+                "Access-Control-Allow-Origin" => "*",
+                "Content-Disposition" => "inline; filename=\"Column.msh\""
             ],
             read(MESH_FILE)
         )
 
-
     catch e
-
         @error "Unable to read MSH" exception=(e, catch_backtrace())
 
         return json_response(
             500,
             Dict(
-                "error" =>
-                    "Unable to read Column.msh.",
-
-                "message" =>
-                    sprint(
-                        showerror,
-                        e
-                    )
+                "error" => "Unable to read Column.msh.",
+                "message" => sprint(showerror, e)
             )
         )
-
     end
 
 end
@@ -695,13 +612,8 @@ end
 # ============================================================
 
 @post "/report/column" function(req::HTTP.Request)
-
     try
-
-        body = JSON3.read(
-            String(req.body)
-        )
-
+        body = JSON3.read(String(req.body))
 
         return Generate_Column_Report(
             Float64(body.Length),
@@ -710,27 +622,17 @@ end
             String(body.Sections)
         )
 
-
     catch e
-
         @error "Report generation failed" exception=(e, catch_backtrace())
 
         return json_response(
             500,
             Dict(
-                "error" =>
-                    "Unable to generate column report.",
-
-                "message" =>
-                    sprint(
-                        showerror,
-                        e
-                    )
+                "error" => "Unable to generate column report.",
+                "message" => sprint(showerror, e)
             )
         )
-
     end
-
 end
 
 
@@ -748,6 +650,7 @@ println()
 println("Routes:")
 println("  GET  /health")
 println("  POST /design/column")
+println("  POST /fem/column")
 println("  GET  /design/column/stl")
 println("  GET  /design/column/mesh")
 println("  POST /report/column")
@@ -758,7 +661,6 @@ println("  POST /report/beam")
 println()
 println("==============================================")
 println()
-
 
 serve(
     host = "127.0.0.1",

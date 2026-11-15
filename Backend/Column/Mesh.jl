@@ -1,6 +1,6 @@
 using Gmsh
-function create_I_section(B, D, tf, tw, h)
 
+function create_I_section(B, D, tf, tw, h)
     x_left = 0.0
     x_right = B
 
@@ -12,6 +12,7 @@ function create_I_section(B, D, tf, tw, h)
 
     z_top_flange = D - tf
     z_top = D
+
     p1 = gmsh.model.geo.addPoint(x_left, 0, z_bottom, h)
     p2 = gmsh.model.geo.addPoint(x_right, 0, z_bottom, h)
     p3 = gmsh.model.geo.addPoint(x_right, 0, z_bottom_flange, h)
@@ -24,6 +25,7 @@ function create_I_section(B, D, tf, tw, h)
     p10 = gmsh.model.geo.addPoint(x_web_left, 0, z_top_flange, h)
     p11 = gmsh.model.geo.addPoint(x_web_left, 0, z_bottom_flange, h)
     p12 = gmsh.model.geo.addPoint(x_left, 0, z_bottom_flange, h)
+
     l1 = gmsh.model.geo.addLine(p1, p2)
     l2 = gmsh.model.geo.addLine(p2, p3)
     l3 = gmsh.model.geo.addLine(p3, p4)
@@ -36,57 +38,25 @@ function create_I_section(B, D, tf, tw, h)
     l10 = gmsh.model.geo.addLine(p10, p11)
     l11 = gmsh.model.geo.addLine(p11, p12)
     l12 = gmsh.model.geo.addLine(p12, p1)
+
     curve_loop = gmsh.model.geo.addCurveLoop([
-        l1,
-        l2,
-        l3,
-        l4,
-        l5,
-        l6,
-        l7,
-        l8,
-        l9,
-        l10,
-        l11,
-        l12
+        l1, l2, l3, l4, l5, l6,
+        l7, l8, l9, l10, l11, l12
     ])
-    surface = gmsh.model.geo.addPlaneSurface([
-        curve_loop
-    ])
+    surface = gmsh.model.geo.addPlaneSurface([curve_loop])
 
     return surface
-
 end
 
 function create_C_section(B, D, tf, tw, h)
-
     p1 = gmsh.model.geo.addPoint(0, 0, 0, h)
     p2 = gmsh.model.geo.addPoint(B, 0, 0, h)
-
-    p3 = gmsh.model.geo.addPoint(
-        B, 0, tf, h
-    )
-
-    p4 = gmsh.model.geo.addPoint(
-        tw, 0, tf, h
-    )
-
-    p5 = gmsh.model.geo.addPoint(
-        tw, 0, D - tf, h
-    )
-
-    p6 = gmsh.model.geo.addPoint(
-        B, 0, D - tf, h
-    )
-
-    p7 = gmsh.model.geo.addPoint(
-        B, 0, D, h
-    )
-
-    p8 = gmsh.model.geo.addPoint(
-        0, 0, D, h
-    )
-
+    p3 = gmsh.model.geo.addPoint(B, 0, tf, h)
+    p4 = gmsh.model.geo.addPoint(tw, 0, tf, h)
+    p5 = gmsh.model.geo.addPoint(tw, 0, D - tf, h)
+    p6 = gmsh.model.geo.addPoint(B, 0, D - tf, h)
+    p7 = gmsh.model.geo.addPoint(B, 0, D, h)
+    p8 = gmsh.model.geo.addPoint(0, 0, D, h)
 
     l1 = gmsh.model.geo.addLine(p1, p2)
     l2 = gmsh.model.geo.addLine(p2, p3)
@@ -97,49 +67,37 @@ function create_C_section(B, D, tf, tw, h)
     l7 = gmsh.model.geo.addLine(p7, p8)
     l8 = gmsh.model.geo.addLine(p8, p1)
 
-
     curve_loop = gmsh.model.geo.addCurveLoop([
-        l1,
-        l2,
-        l3,
-        l4,
-        l5,
-        l6,
-        l7,
-        l8
+        l1, l2, l3, l4, l5, l6, l7, l8
     ])
-
-
     surface = gmsh.model.geo.addPlaneSurface([curve_loop])
+
     return surface
 end
-function create_bottom_plate(B,plate_B,plate_t,h)
+
+function create_bottom_plate(B, plate_B, plate_t, h)
     x_left = (B - plate_B) / 2
     x_right = (B + plate_B) / 2
     z_bottom = -plate_t
     z_top = 0.0
-    p1 = gmsh.model.geo.addPoint(x_left,0,z_bottom,h)
-    p2 = gmsh.model.geo.addPoint(x_right,0,z_bottom,h)
-    p3 = gmsh.model.geo.addPoint(x_right,0,z_top,h)
-    p4 = gmsh.model.geo.addPoint(x_left,0,z_top,h)
+
+    p1 = gmsh.model.geo.addPoint(x_left, 0, z_bottom, h)
+    p2 = gmsh.model.geo.addPoint(x_right, 0, z_bottom, h)
+    p3 = gmsh.model.geo.addPoint(x_right, 0, z_top, h)
+    p4 = gmsh.model.geo.addPoint(x_left, 0, z_top, h)
+
     l1 = gmsh.model.geo.addLine(p1, p2)
     l2 = gmsh.model.geo.addLine(p2, p3)
     l3 = gmsh.model.geo.addLine(p3, p4)
     l4 = gmsh.model.geo.addLine(p4, p1)
-    curve_loop = gmsh.model.geo.addCurveLoop([
-        l1,
-        l2,
-        l3,
-        l4
-    ])
 
-    surface = gmsh.model.geo.addPlaneSurface([
-        curve_loop
-    ])
+    curve_loop = gmsh.model.geo.addCurveLoop([l1, l2, l3, l4])
+    surface = gmsh.model.geo.addPlaneSurface([curve_loop])
+
     return surface
-
 end
-function create_column_mesh(result;output_file = "Column.msh",stl_file = "Column.stl")
+
+function create_column_mesh(result; output_file = "Column.msh", stl_file = "Column.stl")
     section_type = String(result["Section_Type"])
     D = Float64(result["Depth_mm"]) / 1000.0
     B = Float64(result["Width_mm"]) / 1000.0
@@ -147,132 +105,108 @@ function create_column_mesh(result;output_file = "Column.msh",stl_file = "Column
     tw = Float64(result["tw_mm"]) / 1000.0
     L = Float64(result["Length_m"])
 
-
     plate_t = Float64(result["Plate_Thickness_mm"]) / 1000.0
     plate_B = Float64(result["Plate_Width_mm"]) / 1000.0
+
     if D <= 0
-        return Dict(
-            "error" =>
-                "Section depth must be greater than zero."
-        )
+        return Dict("error" => "Section depth must be greater than zero.")
     end
     if B <= 0
-        return Dict(
-            "error" =>
-                "Section width must be greater than zero."
-        )
-
+        return Dict("error" => "Section width must be greater than zero.")
     end
     if tf <= 0
-        return Dict(
-            "error" =>
-                "Flange thickness must be greater than zero."
-        )
-
+        return Dict("error" => "Flange thickness must be greater than zero.")
     end
     if tw <= 0
-        return Dict(
-            "error" =>
-                "Web thickness must be greater than zero."
-        )
+        return Dict("error" => "Web thickness must be greater than zero.")
     end
     if L <= 0
-        return Dict(
-            "error" =>
-                "Column length must be greater than zero."
-        )
+        return Dict("error" => "Column length must be greater than zero.")
     end
     if plate_t < 0
-        return Dict(
-            "error" =>
-                "Plate thickness cannot be negative."
-        )
-
+        return Dict("error" => "Plate thickness cannot be negative.")
     end
     if plate_B < 0
-        return Dict(
-            "error" =>
-                "Plate width cannot be negative."
-        )
-
+        return Dict("error" => "Plate width cannot be negative.")
     end
-    h = min(0.25,min(B, D) / 3)
-    h = max(h,0.01)
+
+    h = min(0.25, min(B, D) / 3)
+    h = max(h, 0.01)
+
     gmsh.initialize()
     try
         gmsh.model.add("Column")
         if section_type == "I"
-            section_surface =create_I_section(B,D,tf,tw,h)
+            section_surface = create_I_section(B, D, tf, tw, h)
         elseif section_type == "C"
-            section_surface =
-                create_C_section(B,D,tf,tw,h)
-
-        else error("Unsupported section type: $section_type")
+            section_surface = create_C_section(B, D, tf, tw, h)
+        else
+            error("Unsupported section type: $section_type")
         end
+
         surfaces = [section_surface]
-        if section_type == "I" &&
-           plate_t > 0 &&
-           plate_B > 0
+        if section_type == "I" && plate_t > 0 && plate_B > 0
             if plate_B > B
                 error("Plate width cannot exceed flange width.")
             end
-            plate_surface =create_bottom_plate(B,plate_B,plate_t,h)
-            push!(surfaces,plate_surface)
+            plate_surface = create_bottom_plate(B, plate_B, plate_t, h)
+            push!(surfaces, plate_surface)
         end
+
         gmsh.model.geo.synchronize()
+
+        bottom_surfaces = Int[]
+        top_surfaces    = Int[]
+        side_surfaces   = Int[]
+        volume_tags     = Int[]
+
         for surface in surfaces
-            gmsh.model.geo.extrude([(2, surface)],0,L,0,[20],[1.0],true)
+            # Set recombine=false so Gmsh generates pure tetrahedra for Ferrite
+            outDimTags = gmsh.model.geo.extrude([(2, surface)], 0, L, 0, [20], [1.0], false)
+            push!(bottom_surfaces, surface)
+            push!(top_surfaces, outDimTags[1][2])
+            push!(volume_tags, outDimTags[2][2])
+
+            # Collect all extruded lateral wall surfaces so Gmsh writes the full outer shell to STL
+            for item in outDimTags[3:end]
+                if item[1] == 2
+                    push!(side_surfaces, item[2])
+                end
+            end
         end
+
         gmsh.model.geo.synchronize()
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMin",h)
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMax",h)
-        gmsh.option.setNumber("Mesh.Algorithm3D",1)
+
+        # Tag boundary surfaces and 3D volume
+        gmsh.model.addPhysicalGroup(2, bottom_surfaces, -1, "bottom_face")
+        gmsh.model.addPhysicalGroup(2, top_surfaces, -1, "top_face")
+        gmsh.model.addPhysicalGroup(2, side_surfaces, -1, "side_faces")
+        gmsh.model.addPhysicalGroup(3, volume_tags, -1, "steel_volume")
+
+        gmsh.option.setNumber("Mesh.CharacteristicLengthMin", h)
+        gmsh.option.setNumber("Mesh.CharacteristicLengthMax", h)
+        gmsh.option.setNumber("Mesh.Algorithm3D", 1)
         gmsh.model.mesh.generate(3)
         gmsh.write(output_file)
         gmsh.write(stl_file)
+
     finally
         gmsh.finalize()
     end
+
     return Dict(
-
-        "success" => true,
-
-        "mesh_file" =>
-            output_file,
-
-        "stl_file" =>
-            stl_file,
-
-        "mesh_url" =>
-            "/design/column/mesh",
-
-        "stl_url" =>
-            "/design/column/stl",
-
-        "section_type" =>
-            section_type,
-
-        "length_m" =>
-            L,
-
-        "depth_m" =>
-            D,
-
-        "width_m" =>
-            B,
-
-        "tf_m" =>
-            tf,
-
-        "tw_m" =>
-            tw,
-
-        "plate_width_m" =>
-            plate_B,
-
-        "plate_thickness_m" =>
-            plate_t
-
+        "success"           => true,
+        "mesh_file"         => output_file,
+        "stl_file"          => stl_file,
+        "mesh_url"          => "/design/column/mesh",
+        "stl_url"           => "/design/column/stl",
+        "section_type"      => section_type,
+        "length_m"          => L,
+        "depth_m"           => D,
+        "width_m"           => B,
+        "tf_m"              => tf,
+        "tw_m"              => tw,
+        "plate_width_m"     => plate_B,
+        "plate_thickness_m" => plate_t
     )
-
 end
