@@ -130,7 +130,7 @@ function run_beam_fem(
     end
     I_strong_m4 = max(I_strong_m4, 1e-15)
 
-    @info "Beam section: A=${left_area_m2} m², I_strong=${I_strong_m4} m⁴"
+    @info "Beam section: A=$(left_area_m2) m^2, I_strong=$(I_strong_m4) m^4"
 
     # ── 6. Assemble K and f ──────────────────────────────────────────────
     K = allocate_matrix(dh)

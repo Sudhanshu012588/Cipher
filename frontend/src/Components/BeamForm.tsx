@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import axios from "axios";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -8,13 +8,34 @@ import {
   Loader2,
   RotateCcw,
   FileText,
+  Activity,
 } from "lucide-react";
 import Navbar from "../Components/Navbar";
 import BeamViewer from "../Components/BeamViewer";
-import { BEAM_DESIGN_URL, BEAM_STL_URL, BEAM_REPORT_URL } from "../constants";
+import BeamFEMViewer from "../Components/BeamFEMViewer";
+import { BEAM_DESIGN_URL, BEAM_STL_URL, BEAM_FEM_URL } from "../constants";
 import type { BeamDesignForm, BeamDesignResult } from "../Types/Type";
 import ResultCard from "./ResultCard.tsx";
 import EngineeringReport from "../Components/EngineeringReport";
+
+interface BeamFemResult {
+  max_deflection_mm: number;
+  max_downward_deflection: number;
+  max_lateral_deflection: number;
+  nominal_flexural_MPa: number;
+  min_von_mises_MPa: number;
+  max_von_mises_MPa: number;
+  avg_von_mises_MPa: number;
+  yield_ratio: number;
+  boundary_condition_label: string;
+  mesh_nodes: number;
+  mesh_elements: number;
+  positions: number[];
+  displacements: number[];
+  colors: number[];
+  applied_load_udl_kNm: number;
+  applied_point_load_kN: number;
+}
 
 function formatKey(key: string): string {
   return key
@@ -63,14 +84,47 @@ export default function BeamForm() {
   const [loading, setLoading] = useState(false);
   const [meshLoading, setMeshLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"model" | "report">("model");
+  const [activeTab, setActiveTab] = useState<"model" | "fem" | "report">("model");
+
+  // FEM State
+  const [femResult, setFemResult] = useState<BeamFemResult | null>(null);
+  const [femLoading, setFemLoading] = useState(false);
+  const [femError, setFemError] = useState<string | null>(null);
+  const [deformScale, setDeformScale] = useState<number>(200);
+
+  // Report State
   const [report, setReport] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  // Build scaled & colored deformed FEM BufferGeometry whenever femResult or deformScale changes
+  const femGeometry = useMemo(() => {
+    if (!femResult?.positions || !femResult?.colors || femResult.positions.length === 0) {
+      return null;
+    }
+    const pos = femResult.positions;
+    const disp = femResult.displacements || [];
+    const deformed = new Float32Array(pos.length);
+    for (let i = 0; i < pos.length; i++) {
+      const d = i < disp.length ? disp[i] : 0;
+      deformed[i] = pos[i] + deformScale * d;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.BufferAttribute(deformed, 3));
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(femResult.colors, 3));
+    geom.computeVertexNormals();
+    geom.center();
+    return geom;
+  }, [femResult, deformScale]);
+
   const clearReport = () => {
     setReport(null);
     setReportError(null);
+  };
+
+  const clearFem = () => {
+    setFemResult(null);
+    setFemError(null);
   };
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,6 +136,7 @@ export default function BeamForm() {
     setResult(null);
     setGeometry(null);
     setError(null);
+    clearFem();
     clearReport();
   };
 
@@ -90,6 +145,7 @@ export default function BeamForm() {
     setResult(null);
     setGeometry(null);
     setError(null);
+    clearFem();
     clearReport();
   };
 
@@ -97,8 +153,9 @@ export default function BeamForm() {
     setMeshLoading(true);
     try {
       const loader = new STLLoader();
-      const loadedGeometry = await loader.loadAsync(BEAM_STL_URL);
+      const loadedGeometry = await loader.loadAsync(`${BEAM_STL_URL}?t=${Date.now()}`);
       loadedGeometry.computeVertexNormals();
+      loadedGeometry.center();
       setGeometry(loadedGeometry);
     } catch (err) {
       console.error("STL loading error:", err);
@@ -114,6 +171,7 @@ export default function BeamForm() {
     setError(null);
     setResult(null);
     setGeometry(null);
+    clearFem();
     clearReport();
 
     try {
@@ -148,6 +206,39 @@ export default function BeamForm() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runFemAnalysis = async () => {
+    setFemLoading(true);
+    setFemError(null);
+
+    try {
+      const response = await axios.post<BeamFemResult>(
+        BEAM_FEM_URL,
+        {
+          wu: form.wu,
+          Wu: form.Wu,
+          b1: form.b1,
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 120000,
+        }
+      );
+      setFemResult(response.data);
+      setActiveTab("fem");
+    } catch (e: any) {
+      console.error("FEM analysis error:", e);
+      if (e.response?.data?.message) {
+        setFemError(e.response.data.message);
+      } else if (e.response?.data?.error) {
+        setFemError(e.response.data.error);
+      } else {
+        setFemError("Unable to run 3D FEM analysis. Make sure Beam Design has been run first.");
+      }
+    } finally {
+      setFemLoading(false);
     }
   };
 
@@ -447,10 +538,44 @@ export default function BeamForm() {
               )}
             </button>
 
+            {/* Run 3D FEM Analysis button */}
+            <button
+              onClick={runFemAnalysis}
+              disabled={!result || femLoading}
+              style={{
+                width: "100%",
+                padding: "13px",
+                marginTop: "10px",
+                border: "none",
+                borderRadius: "7px",
+                background: !result || femLoading ? "#94a3b8" : "#0f766e",
+                color: "white",
+                fontWeight: 600,
+                fontSize: "15px",
+                cursor: !result || femLoading ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+              }}
+            >
+              {femLoading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Solving 3D FEM...
+                </>
+              ) : (
+                <>
+                  <Activity size={18} />
+                  Run 3D FEM Analysis
+                </>
+              )}
+            </button>
+
             {/* Reset button */}
             <button
               onClick={handleReset}
-              disabled={loading}
+              disabled={loading || femLoading}
               style={{
                 width: "100%",
                 padding: "12px",
@@ -503,6 +628,25 @@ export default function BeamForm() {
               }}
             >
               3D Model
+            </button>
+
+            <button
+              onClick={() => setActiveTab("fem")}
+              style={{
+                flex: 1,
+                padding: "16px",
+                border: "none",
+                borderBottom:
+                  activeTab === "fem"
+                    ? "3px solid #0f766e"
+                    : "3px solid transparent",
+                background: "white",
+                color: activeTab === "fem" ? "#0f766e" : "#647894",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              3D FEM Analysis
             </button>
 
             <button
@@ -739,6 +883,405 @@ export default function BeamForm() {
                         </span>
                       );
                     })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB: 3D FEM ANALYSIS */}
+          {activeTab === "fem" && (
+            <div style={{ padding: "24px" }}>
+              {femError && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "flex-start",
+                    padding: "14px",
+                    marginBottom: "18px",
+                    border: "1px solid #f0b8b8",
+                    background: "#fff4f4",
+                    color: "#9b2c2c",
+                    borderRadius: "7px",
+                  }}
+                >
+                  <AlertCircle size={20} />
+                  <div>{femError}</div>
+                </div>
+              )}
+
+              {/* DEFORMATION MAGNIFICATION CONTROLS */}
+              {femResult && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "14px",
+                    padding: "12px 18px",
+                    marginBottom: "14px",
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                      Deformation Magnification: <span style={{ color: "#0f766e" }}>{deformScale}×</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={500}
+                      step={5}
+                      value={deformScale}
+                      onChange={(e) => setDeformScale(Number(e.target.value))}
+                      style={{ width: "160px", cursor: "pointer" }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {[1, 50, 200, 500].map((preset) => (
+                      <button
+                        key={preset}
+                        onClick={() => setDeformScale(preset)}
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          borderRadius: "5px",
+                          border: deformScale === preset ? "1px solid #0f766e" : "1px solid #cbd5e1",
+                          background: deformScale === preset ? "#ccfbf1" : "white",
+                          color: deformScale === preset ? "#0f766e" : "#475569",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {preset === 1 ? "1× True" : `${preset}×`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* FEM 3D VIEWPORT WITH HUD OVERLAYS */}
+              <div
+                style={{
+                  position: "relative",
+                  height: "650px",
+                  background: "#f5f7f9",
+                  border: "1px solid #e1e6ec",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                }}
+              >
+                {femGeometry ? (
+                  <>
+                    <BeamFEMViewer geometry={femGeometry} loading={femLoading} />
+
+                    {femResult && (
+                      <>
+                        {/* TOP-LEFT HUD: DEFORMATION & LOAD */}
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "14px",
+                            left: "14px",
+                            zIndex: 10,
+                            background: "rgba(15, 23, 42, 0.88)",
+                            backdropFilter: "blur(6px)",
+                            color: "white",
+                            padding: "12px 14px",
+                            borderRadius: "8px",
+                            border: "1px solid rgba(148, 163, 184, 0.28)",
+                            fontSize: "12px",
+                            lineHeight: 1.6,
+                            minWidth: "230px",
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "11px",
+                              letterSpacing: "0.06em",
+                              color: "#5eead4",
+                              textTransform: "uppercase",
+                              marginBottom: "6px",
+                            }}
+                          >
+                            3D FEA Deformation & Load
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>UDL Load:</span>
+                            <strong>{femResult.applied_load_udl_kNm} kN/m</strong>
+                          </div>
+                          {femResult.applied_point_load_kN > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                              <span style={{ color: "#cbd5e1" }}>Point Load:</span>
+                              <strong>{femResult.applied_point_load_kN} kN</strong>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Max Downward δ:</span>
+                            <strong style={{ color: "#38bdf8" }}>{femResult.max_downward_deflection} mm</strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Max Lateral:</span>
+                            <strong style={{ color: "#38bdf8" }}>{femResult.max_lateral_deflection} mm</strong>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                            <span style={{ color: "#cbd5e1" }}>Resultant Max (|u|):</span>
+                            <strong>{femResult.max_deflection_mm} mm</strong>
+                          </div>
+                          <div
+                            style={{
+                              marginTop: "6px",
+                              paddingTop: "6px",
+                              borderTop: "1px solid rgba(148, 163, 184, 0.22)",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: "11px",
+                              color: "#94a3b8",
+                            }}
+                          >
+                            <span>Scale: {deformScale}×</span>
+                            <span>
+                              Plotted: {(femResult.max_deflection_mm * deformScale).toFixed(1)} mm
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* TOP-RIGHT HUD: VON MISES STRESS CONTOUR */}
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "14px",
+                            right: "14px",
+                            zIndex: 10,
+                            background: "rgba(15, 23, 42, 0.88)",
+                            backdropFilter: "blur(6px)",
+                            color: "white",
+                            padding: "12px 14px",
+                            borderRadius: "8px",
+                            border: "1px solid rgba(148, 163, 184, 0.28)",
+                            fontSize: "12px",
+                            minWidth: "215px",
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "11px",
+                              letterSpacing: "0.06em",
+                              color: "#fda4af",
+                              textTransform: "uppercase",
+                              marginBottom: "8px",
+                            }}
+                          >
+                            Von Mises Stress (MPa)
+                          </div>
+
+                          <div style={{ display: "flex", gap: "12px", alignItems: "stretch" }}>
+                            <div
+                              style={{
+                                width: "14px",
+                                height: "130px",
+                                borderRadius: "4px",
+                                background:
+                                  "linear-gradient(180deg, #ff0000 0%, #ffff00 25%, #00ff00 50%, #00ffff 75%, #0000ff 100%)",
+                                border: "1px solid rgba(255,255,255,0.45)",
+                              }}
+                            />
+
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                justifyContent: "space-between",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              <span style={{ color: "#f87171" }}>
+                                {femResult.max_von_mises_MPa.toFixed(1)} (Max)
+                              </span>
+                              <span style={{ color: "#facc15" }}>
+                                {(
+                                  femResult.min_von_mises_MPa +
+                                  0.75 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                ).toFixed(1)}
+                              </span>
+                              <span style={{ color: "#4ade80" }}>
+                                {(
+                                  0.5 *
+                                  (femResult.min_von_mises_MPa + femResult.max_von_mises_MPa)
+                                ).toFixed(1)}{" "}
+                                (Mid)
+                              </span>
+                              <span style={{ color: "#22d3ee" }}>
+                                {(
+                                  femResult.min_von_mises_MPa +
+                                  0.25 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                ).toFixed(1)}
+                              </span>
+                              <span style={{ color: "#60a5fa" }}>
+                                {femResult.min_von_mises_MPa.toFixed(1)} (Min)
+                              </span>
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: "8px",
+                              paddingTop: "6px",
+                              borderTop: "1px solid rgba(148, 163, 184, 0.22)",
+                              fontSize: "11px",
+                              color: "#cbd5e1",
+                            }}
+                          >
+                            <div>
+                              Flexural:{" "}
+                              <strong>
+                                {femResult.nominal_flexural_MPa} MPa
+                              </strong>
+                            </div>
+                            <div>
+                              Yield Ratio (fy=250):{" "}
+                              <strong
+                                style={{
+                                  color: femResult.yield_ratio > 0.85 ? "#f87171" : "#4ade80",
+                                }}
+                              >
+                                {(femResult.yield_ratio * 100).toFixed(1)}%
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#61758e",
+                      padding: "24px",
+                      textAlign: "center",
+                    }}
+                  >
+                    {femLoading ? (
+                      <>
+                        <Loader2 size={42} className="animate-spin" />
+                        <strong style={{ marginTop: "14px", fontSize: "17px" }}>
+                          Solving 3D beam bending & compression (Ferrite.jl)...
+                        </strong>
+                      </>
+                    ) : (
+                      <>
+                        <Activity size={42} style={{ marginBottom: "14px", opacity: 0.45 }} />
+                        <strong style={{ fontSize: "17px", color: "#44556c" }}>
+                          3D FEM Results Not Generated
+                        </strong>
+                        <div style={{ marginTop: "7px", maxWidth: "420px" }}>
+                          {result
+                            ? "Click below to solve 3D Von Mises stresses and beam deflection."
+                            : "Run Beam Design first to generate the 3D tetrahedral mesh, then run FEM analysis."}
+                        </div>
+                        {result && (
+                          <button
+                            onClick={runFemAnalysis}
+                            style={{
+                              marginTop: "18px",
+                              padding: "11px 20px",
+                              border: "none",
+                              borderRadius: "7px",
+                              background: "#0f766e",
+                              color: "white",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <Activity size={17} />
+                            Run 3D FEM Analysis
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* DETAILED ENGINEERING & FEA BREAKDOWN CARDS */}
+              {femResult && (
+                <>
+                  <div
+                    style={{
+                      marginTop: "20px",
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                      gap: "12px",
+                    }}
+                  >
+                    <ResultCard
+                      label="Peak Von Mises Stress"
+                      value={`${femResult.max_von_mises_MPa} MPa`}
+                    />
+                    <ResultCard
+                      label="Nominal Flexural Stress"
+                      value={`${femResult.nominal_flexural_MPa} MPa`}
+                    />
+                    <ResultCard
+                      label="Material Yield Utilization"
+                      value={`${(femResult.yield_ratio * 100).toFixed(1)}% (σ / fy)`}
+                    />
+                    <ResultCard
+                      label="Max Deflection"
+                      value={`${femResult.max_deflection_mm} mm`}
+                    />
+                    <ResultCard
+                      label="Downward Deflection"
+                      value={`${femResult.max_downward_deflection} mm`}
+                    />
+                    <ResultCard
+                      label="3D Mesh & Support"
+                      value={`${femResult.mesh_nodes} nodes / ${femResult.mesh_elements} tets`}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      padding: "12px 16px",
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "7px",
+                      fontSize: "13px",
+                      color: "#475569",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>
+                      <strong>Support Condition:</strong> {femResult.boundary_condition_label}
+                    </span>
+                    <span>
+                      <strong>Loading Model:</strong> UDL + Mid-span Point Load
+                    </span>
                   </div>
                 </>
               )}
