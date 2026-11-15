@@ -20,3 +20,21 @@ export interface ColumnViewerProps {
   loading: boolean;
 }
 
+export interface BeamFEMModelProps {
+  geometry: THREE.BufferGeometry;
+}
+
+export interface BeamFEMViewerProps {
+  geometry: THREE.BufferGeometry | null;
+  loading: boolean;
+}
+
+export interface LacingModelProps {
+  geometry: THREE.BufferGeometry;
+}
+
+export interface LacingViewerProps {
+  geometry: THREE.BufferGeometry | null;
+  loading: boolean;
+}
+

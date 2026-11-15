@@ -76,8 +76,30 @@ function create_beam_mesh(result; output_file = "Beam.msh", stl_file = "Beam.stl
         gmsh.model.geo.synchronize()
 
         ## Extrude horizontally along the X-axis by span L
-        gmsh.model.geo.extrude([(2, section_surface)], L, 0, 0, [20], [1.0], true)
+        # Use recombine=false so Gmsh generates pure tetrahedra (required for Ferrite.fem)
+        outDimTags = gmsh.model.geo.extrude([(2, section_surface)], L, 0, 0, [20], [1.0], false)
         gmsh.model.geo.synchronize()
+
+        # Tag boundary surfaces and 3D volume (same pattern as column mesh)
+        bottom_surfaces = Int[]
+        top_surfaces    = Int[]
+        side_surfaces   = Int[]
+        volume_tags     = Int[]
+
+        push!(bottom_surfaces, section_surface)
+        push!(top_surfaces, outDimTags[1][2])
+        push!(volume_tags, outDimTags[2][2])
+
+        for item in outDimTags[3:end]
+            if item[1] == 2
+                push!(side_surfaces, item[2])
+            end
+        end
+
+        gmsh.model.addPhysicalGroup(2, bottom_surfaces, -1, "bottom_face")
+        gmsh.model.addPhysicalGroup(2, top_surfaces, -1, "top_face")
+        gmsh.model.addPhysicalGroup(2, side_surfaces, -1, "side_faces")
+        gmsh.model.addPhysicalGroup(3, volume_tags, -1, "steel_volume")
 
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", h)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", h)

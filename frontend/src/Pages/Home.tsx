@@ -1,4 +1,11 @@
-import { ArrowRight, Box, Columns3 } from "lucide-react";
+import {
+  ArrowRight,
+  Box,
+  Columns3,
+  GitBranch,
+  Layers3,
+} from "lucide-react";
+
 import { useNavigate } from "react-router";
 import Navbar from "../Components/Navbar.tsx";
 
@@ -33,14 +40,100 @@ const Home = () => (
         </p>
       </section>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        {designs.map((design) => (
-          <DesignCard key={design.path} {...design} />
-        ))}
-      </section>
-    </main>
-  </div>
-);
+
+        {/* Design Cards */}
+        <section>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+
+            {/* Beam */}
+            <DesignCard
+  icon={<Box size={28} />}
+  title="Beam"
+  description="Design reinforced concrete and steel beams."
+  path="/beam"
+/>
+
+<DesignCard
+  icon={<Columns3 size={28} />}
+  title="Column"
+  description="Design structural columns for axial and bending loads."
+  path="/column"
+/>
+
+<DesignCard
+  icon={<GitBranch size={28} />}
+  title="Splicing"
+  description="Design structural member splice connections."
+  path="/splicing"
+/>
+
+<DesignCard
+  icon={<Layers3 size={28} />}
+  title="Batten Column"
+  description="Design built-up columns with batten connections."
+  path="/batten-column"
+/>
+
+          </div>
+
+        </section>
+
+
+        {/* Recent Designs */}
+        <section className="mt-12">
+
+          <div className="flex items-center justify-between mb-4">
+
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Recent Designs
+              </h2>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Continue working on your previous designs.
+              </p>
+            </div>
+
+            <button className="text-xs text-orange-600 hover:text-orange-700">
+              View all
+            </button>
+
+          </div>
+
+
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+
+            <RecentDesign
+              type="BEAM"
+              name="Main Floor Beam"
+              date="26 Aug 2026"
+            />
+
+            <RecentDesign
+              type="COLUMN"
+              name="Ground Floor Column"
+              date="25 Aug 2026"
+            />
+
+            <RecentDesign
+              type="SPLICING"
+              name="Steel Beam Splice"
+              date="24 Aug 2026"
+            />
+
+          </div>
+
+        </section>
+
+      </main>
+
+    </div>
+  );
+};
+
+
+/* ================= DESIGN CARD ================= */
 
 type DesignCardProps = (typeof designs)[number];
 
@@ -51,7 +144,7 @@ const DesignCard = ({ icon, title, description, path }: DesignCardProps) => {
     <button
       type="button"
       onClick={() => navigate(path)}
-      className="group text-left bg-white border border-slate-200 rounded-lg p-6 cursor-pointer transition-all duration-200 hover:border-orange-400 hover:shadow-md"
+      className="group bg-white border border-slate-200 rounded-lg p-6 cursor-pointer transition-all duration-200 hover:border-orange-400 hover:shadow-md"
     >
       <div className="h-12 w-12 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center group-hover:bg-orange-50 group-hover:text-orange-600 transition">
         {icon}
@@ -65,8 +158,63 @@ const DesignCard = ({ icon, title, description, path }: DesignCardProps) => {
           className="transition-transform group-hover:translate-x-1"
         />
       </div>
-    </button>
+
+    </div>
   );
 };
+
+
+/* ================= RECENT DESIGN ================= */
+
+type RecentDesignProps = {
+  type: string;
+  name: string;
+  date: string;
+};
+
+const RecentDesign = ({
+  type,
+  name,
+  date,
+}: RecentDesignProps) => {
+
+  return (
+    <div className="flex items-center px-5 py-4 border-b border-slate-100 last:border-b-0 hover:bg-slate-50 transition">
+
+      {/* Type */}
+      <div className="w-24">
+
+        <span className="text-[9px] font-bold tracking-wide px-2 py-1 rounded bg-slate-100 text-slate-600">
+          {type}
+        </span>
+
+      </div>
+
+
+      {/* Name */}
+      <div className="flex-1">
+
+        <p className="text-sm font-medium text-slate-800">
+          {name}
+        </p>
+
+      </div>
+
+
+      {/* Date */}
+      <div className="text-xs text-slate-400">
+        {date}
+      </div>
+
+
+      <ArrowRight
+        size={15}
+        className="ml-5 text-slate-400"
+      />
+
+    </div>
+  );
+};
+
 
 export default Home;
