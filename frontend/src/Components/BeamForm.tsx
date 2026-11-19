@@ -13,10 +13,19 @@ import {
 import Navbar from "../Components/Navbar";
 import BeamViewer from "../Components/BeamViewer";
 import BeamFEMViewer from "../Components/BeamFEMViewer";
-import { BEAM_DESIGN_URL, BEAM_STL_URL, BEAM_FEM_URL } from "../constants";
+import {
+  BEAM_DESIGN_URL,
+  BEAM_STL_URL,
+  BEAM_FEM_URL,
+  BEAM_REPORT_URL,
+} from "../constants";
 import type { BeamDesignForm, BeamDesignResult } from "../Types/Type";
 import ResultCard from "./ResultCard.tsx";
 import EngineeringReport from "../Components/EngineeringReport";
+
+interface BeamFormWithBC extends BeamDesignForm {
+  Boundary_Condition: number;
+}
 
 interface BeamFemResult {
   max_deflection_mm: number;
@@ -37,6 +46,37 @@ interface BeamFemResult {
   applied_point_load_kN: number;
 }
 
+const BOUNDARY_CONDITION_OPTIONS = [
+  {
+    value: 0,
+    label: "0 — Simply Supported (Pinned-Pinned)",
+    pointLoadNote: "Point load applied at mid-span (L/2)",
+  },
+  {
+    value: 1,
+    label: "1 — Fixed-Fixed (Both Ends Fixed)",
+    pointLoadNote: "Point load applied at mid-span (L/2)",
+  },
+  {
+    value: 2,
+    label: "2 — Cantilever (Fixed-Free)",
+    pointLoadNote: "Point load applied at free tip (x = L)",
+  },
+  {
+    value: 3,
+    label: "3 — Propped Cantilever (Fixed-Pinned)",
+    pointLoadNote: "Point load applied at mid-span (L/2)",
+  },
+];
+
+const INITIAL_FORM: BeamFormWithBC = {
+  Span: 6,
+  wu: 50,
+  Wu: 0,
+  b1: 100,
+  Boundary_Condition: 0,
+};
+
 function formatKey(key: string): string {
   return key
     .replace(/_/g, " ")
@@ -51,9 +91,7 @@ function formatValue(value: any): string {
     return value ? "Yes" : "No";
   }
   if (typeof value === "number") {
-    return Number.isInteger(value)
-      ? value.toString()
-      : value.toFixed(3);
+    return Number.isInteger(value) ? value.toString() : value.toFixed(3);
   }
   return String(value);
 }
@@ -73,12 +111,7 @@ const CHECK_LABELS: Record<string, string> = {
 };
 
 export default function BeamForm() {
-  const [form, setForm] = useState<BeamDesignForm>({
-    Span: 6,
-    wu: 50,
-    Wu: 0,
-    b1: 100,
-  });
+  const [form, setForm] = useState<BeamFormWithBC>(INITIAL_FORM);
   const [result, setResult] = useState<BeamDesignResult | null>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,9 +130,21 @@ export default function BeamForm() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
 
+  const selectedBcOption = useMemo(
+    () =>
+      BOUNDARY_CONDITION_OPTIONS.find(
+        (opt) => opt.value === form.Boundary_Condition
+      ) || BOUNDARY_CONDITION_OPTIONS[0],
+    [form.Boundary_Condition]
+  );
+
   // Build scaled & colored deformed FEM BufferGeometry whenever femResult or deformScale changes
   const femGeometry = useMemo(() => {
-    if (!femResult?.positions || !femResult?.colors || femResult.positions.length === 0) {
+    if (
+      !femResult?.positions ||
+      !femResult?.colors ||
+      femResult.positions.length === 0
+    ) {
       return null;
     }
     const pos = femResult.positions;
@@ -111,7 +156,10 @@ export default function BeamForm() {
     }
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.BufferAttribute(deformed, 3));
-    geom.setAttribute("color", new THREE.Float32BufferAttribute(femResult.colors, 3));
+    geom.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(femResult.colors, 3)
+    );
     geom.computeVertexNormals();
     geom.center();
     return geom;
@@ -127,7 +175,9 @@ export default function BeamForm() {
     setFemError(null);
   };
 
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
     const { name, value } = event.target;
     setForm((previous) => ({
       ...previous,
@@ -141,7 +191,7 @@ export default function BeamForm() {
   };
 
   const handleReset = () => {
-    setForm({ Span: 6, wu: 50, Wu: 0, b1: 100 });
+    setForm(INITIAL_FORM);
     setResult(null);
     setGeometry(null);
     setError(null);
@@ -153,7 +203,9 @@ export default function BeamForm() {
     setMeshLoading(true);
     try {
       const loader = new STLLoader();
-      const loadedGeometry = await loader.loadAsync(`${BEAM_STL_URL}?t=${Date.now()}`);
+      const loadedGeometry = await loader.loadAsync(
+        `${BEAM_STL_URL}?t=${Date.now()}`
+      );
       loadedGeometry.computeVertexNormals();
       loadedGeometry.center();
       setGeometry(loadedGeometry);
@@ -220,6 +272,7 @@ export default function BeamForm() {
           wu: form.wu,
           Wu: form.Wu,
           b1: form.b1,
+          Boundary_Condition: form.Boundary_Condition,
         },
         {
           headers: { "Content-Type": "application/json" },
@@ -235,7 +288,9 @@ export default function BeamForm() {
       } else if (e.response?.data?.error) {
         setFemError(e.response.data.error);
       } else {
-        setFemError("Unable to run 3D FEM analysis. Make sure Beam Design has been run first.");
+        setFemError(
+          "Unable to run 3D FEM analysis. Make sure Beam Design has been run first."
+        );
       }
     } finally {
       setFemLoading(false);
@@ -341,6 +396,51 @@ export default function BeamForm() {
           </div>
 
           <div style={{ padding: "24px" }}>
+            {/* Boundary Condition */}
+            <label
+              style={{
+                display: "block",
+                fontWeight: 600,
+                color: "#34455d",
+                marginBottom: "8px",
+              }}
+            >
+              Boundary Condition
+            </label>
+            <div style={{ marginBottom: "24px" }}>
+              <select
+                name="Boundary_Condition"
+                value={form.Boundary_Condition}
+                onChange={handleChange}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "12px 14px",
+                  border: "1px solid #cfd8e3",
+                  borderRadius: "7px",
+                  fontSize: "14px",
+                  background: "white",
+                  color: "#203047",
+                  cursor: "pointer",
+                }}
+              >
+                {BOUNDARY_CONDITION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "12px",
+                  color: "#647894",
+                }}
+              >
+                {selectedBcOption.pointLoadNote}
+              </div>
+            </div>
+
             {/* Span */}
             <label
               style={{
@@ -352,7 +452,7 @@ export default function BeamForm() {
             >
               Beam Span
             </label>
-            <div style={{ position: "relative", marginBottom: "28px" }}>
+            <div style={{ position: "relative", marginBottom: "24px" }}>
               <input
                 type="number"
                 name="Span"
@@ -393,7 +493,7 @@ export default function BeamForm() {
             >
               Factored UDL (w<sub>u</sub>)
             </label>
-            <div style={{ position: "relative", marginBottom: "28px" }}>
+            <div style={{ position: "relative", marginBottom: "24px" }}>
               <input
                 type="number"
                 name="wu"
@@ -434,7 +534,7 @@ export default function BeamForm() {
             >
               Factored Point Load (W<sub>u</sub>)
             </label>
-            <div style={{ position: "relative", marginBottom: "28px" }}>
+            <div style={{ position: "relative", marginBottom: "24px" }}>
               <input
                 type="number"
                 name="Wu"
@@ -756,7 +856,7 @@ export default function BeamForm() {
                 )}
               </div>
 
-              {/* QUICK RESULT CARDS (Same format as Column) */}
+              {/* QUICK RESULT CARDS */}
               {result && !result.error && (
                 <>
                   <div
@@ -819,7 +919,7 @@ export default function BeamForm() {
                     />
                   </div>
 
-                  {/* STATUS & CHECKS BADGES */}
+                  {/* SUPPORT & STATUS BADGES */}
                   <div
                     style={{
                       marginTop: "20px",
@@ -851,6 +951,23 @@ export default function BeamForm() {
                         <AlertCircle size={16} />
                       )}
                       {result.Status || "UNKNOWN"}
+                    </span>
+
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "6px 14px",
+                        borderRadius: "999px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        background: "#eff6ff",
+                        color: "#1d4ed8",
+                        border: "1px solid #bfdbfe",
+                      }}
+                    >
+                      {result.Boundary_Condition_Label ||
+                        selectedBcOption.label}
                     </span>
 
                     {CHECK_KEYS.map((key) => {
@@ -927,9 +1044,22 @@ export default function BeamForm() {
                     borderRadius: "8px",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
-                      Deformation Magnification: <span style={{ color: "#0f766e" }}>{deformScale}×</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        color: "#1e293b",
+                      }}
+                    >
+                      Deformation Magnification:{" "}
+                      <span style={{ color: "#0f766e" }}>{deformScale}×</span>
                     </span>
                     <input
                       type="range"
@@ -952,9 +1082,14 @@ export default function BeamForm() {
                           fontSize: "12px",
                           fontWeight: 600,
                           borderRadius: "5px",
-                          border: deformScale === preset ? "1px solid #0f766e" : "1px solid #cbd5e1",
-                          background: deformScale === preset ? "#ccfbf1" : "white",
-                          color: deformScale === preset ? "#0f766e" : "#475569",
+                          border:
+                            deformScale === preset
+                              ? "1px solid #0f766e"
+                              : "1px solid #cbd5e1",
+                          background:
+                            deformScale === preset ? "#ccfbf1" : "white",
+                          color:
+                            deformScale === preset ? "#0f766e" : "#475569",
                           cursor: "pointer",
                         }}
                       >
@@ -978,7 +1113,10 @@ export default function BeamForm() {
               >
                 {femGeometry ? (
                   <>
-                    <BeamFEMViewer geometry={femGeometry} loading={femLoading} />
+                    <BeamFEMViewer
+                      geometry={femGeometry}
+                      loading={femLoading}
+                    />
 
                     {femResult && (
                       <>
@@ -1014,26 +1152,72 @@ export default function BeamForm() {
                           >
                             3D FEA Deformation & Load
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                            }}
+                          >
                             <span style={{ color: "#cbd5e1" }}>UDL Load:</span>
-                            <strong>{femResult.applied_load_udl_kNm} kN/m</strong>
+                            <strong>
+                              {femResult.applied_load_udl_kNm} kN/m
+                            </strong>
                           </div>
                           {femResult.applied_point_load_kN > 0 && (
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                              <span style={{ color: "#cbd5e1" }}>Point Load:</span>
-                              <strong>{femResult.applied_point_load_kN} kN</strong>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: "12px",
+                              }}
+                            >
+                              <span style={{ color: "#cbd5e1" }}>
+                                Point Load:
+                              </span>
+                              <strong>
+                                {femResult.applied_point_load_kN} kN
+                              </strong>
                             </div>
                           )}
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                            <span style={{ color: "#cbd5e1" }}>Max Downward δ:</span>
-                            <strong style={{ color: "#38bdf8" }}>{femResult.max_downward_deflection} mm</strong>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                            }}
+                          >
+                            <span style={{ color: "#cbd5e1" }}>
+                              Max Downward δ:
+                            </span>
+                            <strong style={{ color: "#38bdf8" }}>
+                              {femResult.max_downward_deflection} mm
+                            </strong>
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                            <span style={{ color: "#cbd5e1" }}>Max Lateral:</span>
-                            <strong style={{ color: "#38bdf8" }}>{femResult.max_lateral_deflection} mm</strong>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                            }}
+                          >
+                            <span style={{ color: "#cbd5e1" }}>
+                              Max Lateral:
+                            </span>
+                            <strong style={{ color: "#38bdf8" }}>
+                              {femResult.max_lateral_deflection} mm
+                            </strong>
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                            <span style={{ color: "#cbd5e1" }}>Resultant Max (|u|):</span>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                            }}
+                          >
+                            <span style={{ color: "#cbd5e1" }}>
+                              Resultant Max (|u|):
+                            </span>
                             <strong>{femResult.max_deflection_mm} mm</strong>
                           </div>
                           <div
@@ -1049,7 +1233,11 @@ export default function BeamForm() {
                           >
                             <span>Scale: {deformScale}×</span>
                             <span>
-                              Plotted: {(femResult.max_deflection_mm * deformScale).toFixed(1)} mm
+                              Plotted:{" "}
+                              {(
+                                femResult.max_deflection_mm * deformScale
+                              ).toFixed(1)}{" "}
+                              mm
                             </span>
                           </div>
                         </div>
@@ -1086,7 +1274,13 @@ export default function BeamForm() {
                             Von Mises Stress (MPa)
                           </div>
 
-                          <div style={{ display: "flex", gap: "12px", alignItems: "stretch" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "12px",
+                              alignItems: "stretch",
+                            }}
+                          >
                             <div
                               style={{
                                 width: "14px",
@@ -1114,20 +1308,25 @@ export default function BeamForm() {
                               <span style={{ color: "#facc15" }}>
                                 {(
                                   femResult.min_von_mises_MPa +
-                                  0.75 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                  0.75 *
+                                    (femResult.max_von_mises_MPa -
+                                      femResult.min_von_mises_MPa)
                                 ).toFixed(1)}
                               </span>
                               <span style={{ color: "#4ade80" }}>
                                 {(
                                   0.5 *
-                                  (femResult.min_von_mises_MPa + femResult.max_von_mises_MPa)
+                                  (femResult.min_von_mises_MPa +
+                                    femResult.max_von_mises_MPa)
                                 ).toFixed(1)}{" "}
                                 (Mid)
                               </span>
                               <span style={{ color: "#22d3ee" }}>
                                 {(
                                   femResult.min_von_mises_MPa +
-                                  0.25 * (femResult.max_von_mises_MPa - femResult.min_von_mises_MPa)
+                                  0.25 *
+                                    (femResult.max_von_mises_MPa -
+                                      femResult.min_von_mises_MPa)
                                 ).toFixed(1)}
                               </span>
                               <span style={{ color: "#60a5fa" }}>
@@ -1155,7 +1354,10 @@ export default function BeamForm() {
                               Yield Ratio (fy=250):{" "}
                               <strong
                                 style={{
-                                  color: femResult.yield_ratio > 0.85 ? "#f87171" : "#4ade80",
+                                  color:
+                                    femResult.yield_ratio > 0.85
+                                      ? "#f87171"
+                                      : "#4ade80",
                                 }}
                               >
                                 {(femResult.yield_ratio * 100).toFixed(1)}%
@@ -1188,7 +1390,10 @@ export default function BeamForm() {
                       </>
                     ) : (
                       <>
-                        <Activity size={42} style={{ marginBottom: "14px", opacity: 0.45 }} />
+                        <Activity
+                          size={42}
+                          style={{ marginBottom: "14px", opacity: 0.45 }}
+                        />
                         <strong style={{ fontSize: "17px", color: "#44556c" }}>
                           3D FEM Results Not Generated
                         </strong>
@@ -1277,10 +1482,13 @@ export default function BeamForm() {
                     }}
                   >
                     <span>
-                      <strong>Support Condition:</strong> {femResult.boundary_condition_label}
+                      <strong>Support Condition:</strong>{" "}
+                      {femResult.boundary_condition_label ||
+                        selectedBcOption.label}
                     </span>
                     <span>
-                      <strong>Loading Model:</strong> UDL + Mid-span Point Load
+                      <strong>Loading Model:</strong>{" "}
+                      {selectedBcOption.pointLoadNote}
                     </span>
                   </div>
                 </>
@@ -1321,7 +1529,9 @@ export default function BeamForm() {
                         Beam Design Report
                       </h2>
                       <p style={{ color: "#71839a", marginBottom: 0 }}>
-                        {result.Designation || "Designed Beam"}
+                        {result.Designation || "Designed Beam"} —{" "}
+                        {result.Boundary_Condition_Label ||
+                          selectedBcOption.label}
                       </p>
                     </div>
 
@@ -1384,8 +1594,7 @@ export default function BeamForm() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns:
-                        "repeat(2, minmax(0, 1fr))",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                       gap: "12px",
                       marginBottom: "24px",
                     }}
@@ -1427,14 +1636,10 @@ export default function BeamForm() {
                               color: "#203047",
                             }}
                           >
-                            {formatValue(value)}
                           </div>
                         </div>
                       ))}
                   </div>
-
-                  {/* LLM REPORT */}
-                  {report && <EngineeringReport report={report} />}
                 </>
               )}
             </div>

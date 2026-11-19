@@ -4,17 +4,23 @@ using DataFrames
 ## Logic_Beam.jl — IS 800 Steel Beam Flexural Design Engine
 ##
 ## Unit conventions (maintained throughout):
-##   Lengths    : mm  (internally); span input in m, converted at entry
-##   Forces     : kN
-##   Moments    : kN·m
-##   Stresses   : MPa  (= N/mm²)
+##   Lengths        : mm  (internally); span input in m, converted at entry
+##   Forces         : kN
+##   Moments        : kN·m
+##   Stresses       : MPa  (= N/mm²)
 ##   Section moduli : mm³
-##   Inertia    : mm⁴
+##   Inertia        : mm⁴
 ##
 ## Material constants (IS 800, Fe410 / E250):
 ##   f_y    = 250 MPa
 ##   γ_m0   = 1.10
 ##   E      = 200 000 MPa
+##
+## Boundary Conditions:
+##   0 => Simply Supported (Pinned-Roller)
+##   1 => Fixed-Fixed (Both Ends Fixed)
+##   2 => Cantilever (Fixed-Free, point load at free tip)
+##   3 => Propped Cantilever (Fixed-Pinned)
 
 ## ============================================================
 ## CSV PATH  (relative to this file, one level up)
@@ -27,6 +33,13 @@ const Steel_Table_CSV_Beam = joinpath(
     "steel_sections_I_C_IS808_fixed.csv"
 )
 
+const BEAM_BC_LABELS = Dict(
+    0 => "Simply Supported (Pinned-Pinned)",
+    1 => "Fixed-Fixed (Both Ends Fixed)",
+    2 => "Cantilever (Fixed-Free)",
+    3 => "Propped Cantilever (Fixed-Pinned)"
+)
+
 
 ## ============================================================
 ## DESIGN FUNCTION
@@ -36,7 +49,8 @@ function Design_Beam(
     span_m,
     wu_kN_m,
     Wu_kN,
-    b1_mm = 100.0
+    b1_mm = 100.0,
+    boundary_condition::Int = 0
 )
 
     try
@@ -84,20 +98,50 @@ function Design_Beam(
             )
         end
 
+        if !(boundary_condition in (0, 1, 2, 3))
+            return Dict(
+                "error" => "Boundary condition must be 0 (Simply Supported), 1 (Fixed-Fixed), 2 (Cantilever), or 3 (Propped Cantilever)."
+            )
+        end
+
 
         ## ------------------------------------------------
-        ## STEP 1 — Factored loads and design actions
-        ##   M_u  (kN·m) = wu*L²/8 + Wu*L/4
-        ##   V_u_s (kN)  = wu*L/2 + Wu/2       (shear at support)
-        ##   V_u_m (kN)  = Wu/2                 (shear at midspan from point load)
+        ## STEP 1 — Factored loads and design actions by BC
+        ##   Case 0 (Simply Supported):
+        ##     M_u   = wu*L²/8  + Wu*L/4
+        ##     V_u_s = wu*L/2   + Wu/2
+        ##   Case 1 (Fixed-Fixed):
+        ##     M_u   = wu*L²/12 + Wu*L/8
+        ##     V_u_s = wu*L/2   + Wu/2
+        ##   Case 2 (Cantilever — Wu at free tip):
+        ##     M_u   = wu*L²/2  + Wu*L
+        ##     V_u_s = wu*L     + Wu
+        ##   Case 3 (Propped Cantilever):
+        ##     M_u   = wu*L²/8  + 3*Wu*L/16
+        ##     V_u_s = 5*wu*L/8 + 11*Wu/16
         ## ------------------------------------------------
 
         L_m   = span_m
         L_mm  = span_m * 1000.0   # mm
+        bc_label = BEAM_BC_LABELS[boundary_condition]
 
-        M_u   = wu_kN_m * L_m^2 / 8.0 + Wu_kN * L_m / 4.0   # kN·m
-        V_u_s = wu_kN_m * L_m / 2.0  + Wu_kN / 2.0           # kN
-        V_u_m = Wu_kN / 2.0                                    # kN  (from point load only)
+        if boundary_condition == 0
+            M_u   = wu_kN_m * L_m^2 / 8.0  + Wu_kN * L_m / 4.0
+            V_u_s = wu_kN_m * L_m / 2.0    + Wu_kN / 2.0
+            V_u_m = Wu_kN / 2.0
+        elseif boundary_condition == 1
+            M_u   = wu_kN_m * L_m^2 / 12.0 + Wu_kN * L_m / 8.0
+            V_u_s = wu_kN_m * L_m / 2.0    + Wu_kN / 2.0
+            V_u_m = Wu_kN / 2.0
+        elseif boundary_condition == 2
+            M_u   = wu_kN_m * L_m^2 / 2.0  + Wu_kN * L_m
+            V_u_s = wu_kN_m * L_m          + Wu_kN
+            V_u_m = Wu_kN
+        else # boundary_condition == 3 (Propped Cantilever)
+            M_u   = wu_kN_m * L_m^2 / 8.0  + (3.0 / 16.0) * Wu_kN * L_m
+            V_u_s = (5.0 / 8.0) * wu_kN_m * L_m + (11.0 / 16.0) * Wu_kN
+            V_u_m = (11.0 / 16.0) * Wu_kN
+        end
 
         if !isfinite(M_u) || M_u <= 0
             return Dict(
@@ -115,7 +159,6 @@ function Design_Beam(
         ## ------------------------------------------------
         ## STEP 2 — Required plastic section modulus
         ##   M_d = Z_p * f_y / γ_m0   →   Z_p_reqd = M_u * 1e6 * γ_m0 / f_y
-        ##   (M_u in kN·m → multiply by 1e6 to get N·mm)
         ## ------------------------------------------------
 
         Zp_reqd_mm3 = M_u * 1.0e6 * γ_m0 / f_y   # mm³
@@ -136,7 +179,6 @@ function Design_Beam(
 
         all_sections = CSV.read(Steel_Table_CSV_Beam, DataFrame)
 
-        ## Keep only I-sections, sorted lightest first
         i_sections = filter(
             row -> row.Type == "I",
             all_sections
@@ -150,7 +192,6 @@ function Design_Beam(
 
         sort!(i_sections, :Mass_kg_m)
 
-        ## Find first (lightest) I-section with adequate Z_p
         section_idx = findfirst(
             row -> row.Zx_cm3 * 1000.0 >= Zp_reqd_mm3,
             eachrow(i_sections)
@@ -158,41 +199,33 @@ function Design_Beam(
 
         if section_idx === nothing
             return Dict(
-                "error"          => "No I-section found with sufficient plastic section modulus.",
-                "Zp_reqd_mm3"    => Zp_reqd_mm3,
-                "Max_Zx_cm3"     => maximum(i_sections.Zx_cm3),
+                "error"            => "No I-section found with sufficient plastic section modulus.",
+                "Zp_reqd_mm3"      => Zp_reqd_mm3,
+                "Max_Zx_cm3"       => maximum(i_sections.Zx_cm3),
                 "Max_Zp_avail_mm3" => maximum(i_sections.Zx_cm3) * 1000.0
             )
         end
 
         section = i_sections[section_idx, :]
 
-        ## Extract section properties
-        desig  = section.Designation
-        D_mm   = Float64(section.Depth_mm)
-        bf_mm  = Float64(section.Width_mm)
-        tw_mm  = Float64(section.tw_mm)
-        tf_mm  = Float64(section.tf_mm)
-        Ix_cm4 = Float64(section.Ix_cm4)
-        Iy_cm4 = Float64(section.Iy_cm4)
-        Zx_cm3 = Float64(section.Zx_cm3)
-        mass   = Float64(section.Mass_kg_m)
+        desig    = section.Designation
+        D_mm     = Float64(section.Depth_mm)
+        bf_mm    = Float64(section.Width_mm)
+        tw_mm    = Float64(section.tw_mm)
+        tf_mm    = Float64(section.tf_mm)
+        Ix_cm4   = Float64(section.Ix_cm4)
+        Iy_cm4   = Float64(section.Iy_cm4)
+        Zx_cm3   = Float64(section.Zx_cm3)
+        mass     = Float64(section.Mass_kg_m)
         Area_mm2 = Float64(section.Area_mm2)
 
-        Zp_mm3 = Zx_cm3 * 1000.0           # mm³  (plastic section modulus)
-        I_mm4  = Ix_cm4 * 1.0e4            # mm⁴  (major-axis inertia)
-
-        ## Elastic section modulus Ze = I / (D/2)
+        Zp_mm3 = Zx_cm3 * 1000.0           # mm³
+        I_mm4  = Ix_cm4 * 1.0e4            # mm⁴
         Ze_mm3 = I_mm4 / (D_mm / 2.0)      # mm³
 
 
         ## ------------------------------------------------
-        ## STEP 4 — Section classification
-        ##   ε = √(250 / f_y)  = 1.0 for Fe250
-        ##   Plastic :     flange ≤ 8.4ε   AND  web ≤  84ε
-        ##   Compact :     flange ≤ 9.4ε   AND  web ≤ 105ε
-        ##   Semi-compact: flange ≤ 13.6ε  AND  web ≤ 126ε
-        ##   Else Slender
+        ## STEP 4 — Section classification (IS 800 Table 2)
         ## ------------------------------------------------
 
         epsilon       = sqrt(250.0 / f_y)
@@ -213,24 +246,17 @@ function Design_Beam(
 
 
         ## ------------------------------------------------
-        ## STEP 5a — Shear capacity
-        ##   A_v = D * t_w   (shear area of web, IS 800 §8.4.1)
-        ##   V_d = (f_y / (√3 · γ_m0)) · A_v   [N] → /1000 → [kN]
+        ## STEP 5a — Shear capacity (IS 800 §8.4)
         ## ------------------------------------------------
 
-        A_v_mm2 = D_mm * tw_mm                                    # mm²
-        V_d_kN  = (f_y / (sqrt(3.0) * γ_m0)) * A_v_mm2 / 1000.0 # kN
+        A_v_mm2 = D_mm * tw_mm
+        V_d_kN  = (f_y / (sqrt(3.0) * γ_m0)) * A_v_mm2 / 1000.0
 
         shear_check = V_d_kN >= V_u_s
 
 
         ## ------------------------------------------------
-        ## STEP 5b — Moment capacity with shear interaction
-        ##   High shear : V_u_s > 0.6 · V_d
-        ##     β  = (2·V_u_s/V_d − 1)²
-        ##     M_dv = [Z_p·f_y/γ_m0 − β·(Z_p − Z_e)·f_y/γ_m0] / 1e6   kN·m
-        ##   Low shear:
-        ##     M_d = Z_p · f_y / (γ_m0 · 1e6)   kN·m
+        ## STEP 5b — Moment capacity with shear interaction (IS 800 §9.2)
         ## ------------------------------------------------
 
         high_shear = V_u_s > 0.6 * V_d_kN
@@ -239,41 +265,58 @@ function Design_Beam(
             beta  = (2.0 * V_u_s / V_d_kN - 1.0)^2
             M_dv_Nmm = (Zp_mm3 * f_y / γ_m0) -
                        beta * (Zp_mm3 - Ze_mm3) * f_y / γ_m0
-            M_dv_Nmm / 1.0e6   # kN·m
+            M_dv_Nmm / 1.0e6
         else
-            Zp_mm3 * f_y / (γ_m0 * 1.0e6)   # kN·m
+            Zp_mm3 * f_y / (γ_m0 * 1.0e6)
         end
 
         moment_check = M_d_kNm >= M_u
 
 
         ## ------------------------------------------------
-        ## STEP 5c — Deflection check (serviceability)
+        ## STEP 5c — Deflection check (IS 800 §5.6 / Table 6)
         ##   Unfactored loads = factored / 1.5
-        ##   δ_udl = (5/384) · w · L⁴ / (E·I)    w in N/mm
-        ##   δ_pl  = W · L³  / (48·E·I)            W in N
-        ##   δ_lim = L / 300
+        ##   Case 0 (Simply Supported):
+        ##     δ_udl = (5/384)*w*L⁴/(E*I),  δ_pl = W*L³/(48*E*I),  δ_lim = L/300
+        ##   Case 1 (Fixed-Fixed):
+        ##     δ_udl = (1/384)*w*L⁴/(E*I),  δ_pl = W*L³/(192*E*I), δ_lim = L/300
+        ##   Case 2 (Cantilever — tip load W):
+        ##     δ_udl = (1/8)*w*L⁴/(E*I),    δ_pl = W*L³/(3*E*I),   δ_lim = L/150
+        ##   Case 3 (Propped Cantilever):
+        ##     δ_udl = (1/185)*w*L⁴/(E*I),  δ_pl = W*L³/(107*E*I), δ_lim = L/300
         ## ------------------------------------------------
 
-        w_N_mm   = (wu_kN_m / 1.5) * 1000.0 / 1000.0   # N/mm  (kN/m → N/mm: ×1000/1000 = ×1)
-        W_N      = (Wu_kN   / 1.5) * 1000.0             # N
+        w_N_mm = (wu_kN_m / 1.5)         # N/mm (1 kN/m = 1 N/mm)
+        W_N    = (Wu_kN   / 1.5) * 1000.0 # N
 
-        delta_udl = (5.0 / 384.0) * w_N_mm * L_mm^4 / (E_MPa * I_mm4)  # mm
-        delta_pl  = W_N * L_mm^3 / (48.0 * E_MPa * I_mm4)              # mm
-        delta_tot = delta_udl + delta_pl                                  # mm
-        delta_lim = L_mm / 300.0                                         # mm
+        if boundary_condition == 0
+            delta_udl = (5.0 / 384.0) * w_N_mm * L_mm^4 / (E_MPa * I_mm4)
+            delta_pl  = W_N * L_mm^3 / (48.0 * E_MPa * I_mm4)
+            delta_lim = L_mm / 300.0
+        elseif boundary_condition == 1
+            delta_udl = (1.0 / 384.0) * w_N_mm * L_mm^4 / (E_MPa * I_mm4)
+            delta_pl  = W_N * L_mm^3 / (192.0 * E_MPa * I_mm4)
+            delta_lim = L_mm / 300.0
+        elseif boundary_condition == 2
+            delta_udl = (1.0 / 8.0) * w_N_mm * L_mm^4 / (E_MPa * I_mm4)
+            delta_pl  = W_N * L_mm^3 / (3.0 * E_MPa * I_mm4)
+            delta_lim = L_mm / 150.0
+        else # boundary_condition == 3
+            delta_udl = (1.0 / 185.0) * w_N_mm * L_mm^4 / (E_MPa * I_mm4)
+            delta_pl  = W_N * L_mm^3 / (107.0 * E_MPa * I_mm4)
+            delta_lim = L_mm / 300.0
+        end
 
+        delta_tot = delta_udl + delta_pl
         deflection_check = delta_tot <= delta_lim
 
 
         ## ------------------------------------------------
-        ## STEP 5d — Web crippling check (IS 800 §8.7)
-        ##   R (root radius) ≈ t_f  (conservative, R not in CSV)
-        ##   F_w = (b1 + 2.5·(t_f + R)) · t_w · f_y / γ_m0   [N] → /1000 → [kN]
+        ## STEP 5d — Web crippling check (IS 800 §8.7.4)
         ## ------------------------------------------------
 
-        R_mm = tf_mm   # assumed root radius
-        F_w_kN = (b1_mm + 2.5 * (tf_mm + R_mm)) * tw_mm * f_y / (γ_m0 * 1000.0)  # kN
+        R_mm = tf_mm
+        F_w_kN = (b1_mm + 2.5 * (tf_mm + R_mm)) * tw_mm * f_y / (γ_m0 * 1000.0)
 
         web_crippling_check = F_w_kN >= V_u_s
 
@@ -292,11 +335,13 @@ function Design_Beam(
 
         return Dict(
 
-            ## ── Inputs ──────────────────────────────────
-            "Span_m"          => span_m,
-            "wu_kN_m"         => wu_kN_m,
-            "Wu_kN"           => Wu_kN,
-            "b1_mm"           => b1_mm,
+            ## ── Inputs & Boundary Condition ─────────────
+            "Span_m"                   => span_m,
+            "wu_kN_m"                  => wu_kN_m,
+            "Wu_kN"                    => Wu_kN,
+            "b1_mm"                    => b1_mm,
+            "Boundary_Condition"       => boundary_condition,
+            "Boundary_Condition_Label" => bc_label,
 
             ## ── Material ────────────────────────────────
             "fy_MPa"          => f_y,
@@ -347,20 +392,20 @@ function Design_Beam(
             "Moment_Check"    => moment_check ? "PASS" : "FAIL",
 
             ## ── Deflection ───────────────────────────────
-            "w_service_N_mm"  => w_N_mm,
-            "W_service_N"     => W_N,
-            "delta_udl_mm"    => delta_udl,
-            "delta_pl_mm"     => delta_pl,
-            "delta_total_mm"  => delta_tot,
-            "delta_mm"        => delta_tot,
-            "delta_limit_mm"  => delta_lim,
+            "w_service_N_mm"   => w_N_mm,
+            "W_service_N"      => W_N,
+            "delta_udl_mm"     => delta_udl,
+            "delta_pl_mm"      => delta_pl,
+            "delta_total_mm"   => delta_tot,
+            "delta_mm"         => delta_tot,
+            "delta_limit_mm"   => delta_lim,
             "deflection_check" => deflection_check,
             "Deflection_Check" => deflection_check ? "PASS" : "FAIL",
 
             ## ── Web crippling ────────────────────────────
-            "R_assumed_mm"       => R_mm,
-            "Fw_kN"              => F_w_kN,
-            "F_w_kN"             => F_w_kN,
+            "R_assumed_mm"        => R_mm,
+            "Fw_kN"               => F_w_kN,
+            "F_w_kN"              => F_w_kN,
             "web_crippling_check" => web_crippling_check,
             "Web_Crippling_Check" => web_crippling_check ? "PASS" : "FAIL",
 

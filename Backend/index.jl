@@ -59,7 +59,7 @@ const CORS_HEADERS = [
 
 
 # ============================================================
-# JSON RESPONSE HELPER
+# HELPERS
 # ============================================================
 
 function json_response(status::Int, data)
@@ -71,6 +71,16 @@ function json_response(status::Int, data)
         ],
         JSON3.write(data)
     )
+end
+
+function extract_bc(body)::Int
+    if haskey(body, :Boundary_Condition)
+        return Int(body.Boundary_Condition)
+    elseif haskey(body, :boundary_condition)
+        return Int(body.boundary_condition)
+    else
+        return 0
+    end
 end
 
 
@@ -125,7 +135,7 @@ end
         200,
         Dict(
             "status" => "ok",
-            "service" => "Column Design Engine"
+            "service" => "Project Cipher Design Engine"
         )
     )
 end
@@ -137,14 +147,8 @@ end
 
 @post "/design/column" function(req::HTTP.Request)
     try
-        # ----------------------------------------------------
-        # Read request body
-        # ----------------------------------------------------
         body = JSON3.read(String(req.body))
 
-        # ----------------------------------------------------
-        # Extract input parameters
-        # ----------------------------------------------------
         Length = Float64(body.Length)
         Fac_Axial_Load = Float64(body.Fac_Axial_Load)
         Boundary_Condition = Int(body.Boundary_Condition)
@@ -158,9 +162,6 @@ end
         println("Section Type        : ", Sections)
         println("==============================================")
 
-        # ----------------------------------------------------
-        # RUN COLUMN DESIGN
-        # ----------------------------------------------------
         result = Design_Column(
             Length,
             Fac_Axial_Load,
@@ -168,9 +169,6 @@ end
             Sections
         )
 
-        # ----------------------------------------------------
-        # Check whether design failed
-        # ----------------------------------------------------
         if haskey(result, "error")
             println("Column design failed:")
             println(result)
@@ -180,9 +178,6 @@ end
         println("Design successful.")
         println("Selected section: ", result["Designation"])
 
-        # ----------------------------------------------------
-        # GENERATE MESH
-        # ----------------------------------------------------
         println("Generating Gmsh mesh...")
 
         mesh_result = create_column_mesh(
@@ -191,9 +186,6 @@ end
             stl_file = STL_FILE
         )
 
-        # ----------------------------------------------------
-        # Check mesh generation
-        # ----------------------------------------------------
         if haskey(mesh_result, "error")
             println("Mesh generation failed:")
             println(mesh_result["error"])
@@ -212,17 +204,11 @@ end
         println("MSH : ", MESH_FILE)
         println("STL : ", STL_FILE)
 
-        # ----------------------------------------------------
-        # Add mesh information to design result
-        # ----------------------------------------------------
         result["mesh_file"] = mesh_result["mesh_file"]
         result["stl_file"]  = mesh_result["stl_file"]
         result["mesh_url"]  = mesh_result["mesh_url"]
         result["stl_url"]   = mesh_result["stl_url"]
 
-        # ----------------------------------------------------
-        # Return final result
-        # ----------------------------------------------------
         return json_response(200, result)
 
     catch e
@@ -240,7 +226,7 @@ end
 
 
 # ============================================================
-# 3D FEM ANALYSIS (ON-DEMAND)
+# 3D FEM ANALYSIS FOR COLUMN (ON-DEMAND)
 # ============================================================
 
 @post "/fem/column" function(req::HTTP.Request)
@@ -259,7 +245,7 @@ end
         end
 
         println("==============================================")
-        println("3D FEM ANALYSIS REQUEST")
+        println("3D COLUMN FEM ANALYSIS REQUEST")
         println("Mesh File           : ", MESH_FILE)
         println("Factored Axial Load : ", Fac_Axial_Load, " kN")
         println("Boundary Condition  : ", Boundary_Condition)
@@ -290,60 +276,7 @@ end
 
 
 # ============================================================
-# 3D FEM ANALYSIS FOR BEAM (ON-DEMAND)
-# ============================================================
-
-@post "/fem/beam" function(req::HTTP.Request)
-    try
-        body = JSON3.read(String(req.body))
-        wu_kNm = Float64(body.wu)
-        Wu_kN  = haskey(body, :Wu) ? Float64(body.Wu) : 0.0
-        b1_mm  = haskey(body, :b1) ? Float64(body.b1) : 100.0
-
-        if !isfile(BEAM_MESH_FILE)
-            return json_response(
-                400,
-                Dict(
-                    "error" => "Beam.msh not found. Run Beam Design first to generate the 3D mesh."
-                )
-            )
-        end
-
-        println("==============================================")
-        println("3D BEAM FEM ANALYSIS REQUEST")
-        println("Mesh File           : ", BEAM_MESH_FILE)
-        println("Factored UDL (wu)   : ", wu_kNm, " kN/m")
-        println("Factored Point Load : ", Wu_kN, " kN")
-        println("Stiff Bearing (b1)  : ", b1_mm, " mm")
-        println("==============================================")
-
-        fem_result = FEMBeam.run_beam_fem(
-            BEAM_MESH_FILE,
-            wu_kNm,
-            Wu_kN,
-            b1_mm
-        )
-
-        println("FEM completed. Max Von Mises: ", fem_result["max_von_mises_MPa"], " MPa")
-
-        return json_response(200, fem_result)
-
-    catch e
-        @error "Beam FEM analysis failed" exception=(e, catch_backtrace())
-
-        return json_response(
-            500,
-            Dict(
-                "error" => "3D FEM analysis failed.",
-                "message" => sprint(showerror, e)
-            )
-        )
-    end
-end
-
-
-# ============================================================
-# GET STL
+# GET COLUMN STL & MSH
 # ============================================================
 
 @get "/design/column/stl" function(req::HTTP.Request)
@@ -382,11 +315,6 @@ end
     end
 end
 
-
-# ============================================================
-# GET MSH
-# ============================================================
-
 @get "/design/column/mesh" function(req::HTTP.Request)
     try
         if !isfile(MESH_FILE)
@@ -422,7 +350,35 @@ end
             )
         )
     end
+end
 
+
+# ============================================================
+# COLUMN LLM REPORT
+# ============================================================
+
+@post "/report/column" function(req::HTTP.Request)
+    try
+        body = JSON3.read(String(req.body))
+
+        return Generate_Column_Report(
+            Float64(body.Length),
+            Float64(body.Fac_Axial_Load),
+            Int(body.Boundary_Condition),
+            String(body.Sections)
+        )
+
+    catch e
+        @error "Report generation failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error" => "Unable to generate column report.",
+                "message" => sprint(showerror, e)
+            )
+        )
+    end
 end
 
 
@@ -431,19 +387,14 @@ end
 # ============================================================
 
 @post "/design/beam" function(req::HTTP.Request)
-
     try
-
-        body = JSON3.read(
-            String(req.body)
-        )
-
+        body = JSON3.read(String(req.body))
 
         Span  = Float64(body.Span)
         wu    = Float64(body.wu)
         Wu    = Float64(body.Wu)
         b1    = haskey(body, :b1) ? Float64(body.b1) : 100.0
-
+        bc    = extract_bc(body)
 
         println("==============================================")
         println("BEAM DESIGN REQUEST")
@@ -451,35 +402,19 @@ end
         println("Factored UDL (wu)   : ", wu, " kN/m")
         println("Factored Point Load : ", Wu, " kN")
         println("Stiff Bearing (b1)  : ", b1, " mm")
+        println("Boundary Condition  : ", bc)
         println("==============================================")
 
-
-        result = Design_Beam(Span, wu, Wu, b1)
-
+        result = Design_Beam(Span, wu, Wu, b1, bc)
 
         if haskey(result, "error")
-
             println("Beam design failed:")
             println(result)
-
-            return json_response(
-                400,
-                result
-            )
-
+            return json_response(400, result)
         end
 
-
         println("Beam design successful.")
-        println(
-            "Selected section: ",
-            result["Designation"]
-        )
-
-
-        # ----------------------------------------------------
-        # GENERATE BEAM MESH
-        # ----------------------------------------------------
+        println("Selected section: ", result["Designation"])
 
         println("Generating Gmsh mesh for beam...")
 
@@ -512,14 +447,9 @@ end
         result["mesh_url"]  = mesh_result["mesh_url"]
         result["stl_url"]   = mesh_result["stl_url"]
 
-        return json_response(
-            200,
-            result
-        )
-
+        return json_response(200, result)
 
     catch e
-
         @error "Beam design failed" exception=(e, catch_backtrace())
 
         return json_response(
@@ -529,22 +459,74 @@ end
                 "message" => sprint(showerror, e)
             )
         )
-
     end
-
 end
 
 
 # ============================================================
-# GET BEAM STL
+# 3D FEM ANALYSIS FOR BEAM (ON-DEMAND)
+# ============================================================
+
+@post "/fem/beam" function(req::HTTP.Request)
+    try
+        body = JSON3.read(String(req.body))
+
+        wu = Float64(body.wu)
+        Wu = Float64(body.Wu)
+        b1 = haskey(body, :b1) ? Float64(body.b1) : 100.0
+        bc = extract_bc(body)
+
+        if !isfile(BEAM_MESH_FILE)
+            return json_response(
+                400,
+                Dict(
+                    "error" => "Beam.msh not found. Run Beam Design first to generate the 3D mesh."
+                )
+            )
+        end
+
+        println("==============================================")
+        println("3D BEAM FEM ANALYSIS REQUEST")
+        println("Mesh File           : ", BEAM_MESH_FILE)
+        println("Factored UDL (wu)   : ", wu, " kN/m")
+        println("Factored Point Load : ", Wu, " kN")
+        println("Stiff Bearing (b1)  : ", b1, " mm")
+        println("Boundary Condition  : ", bc)
+        println("==============================================")
+
+        fem_result = FEMBeam.run_beam_fem(
+            BEAM_MESH_FILE,
+            wu,
+            Wu,
+            b1,
+            bc
+        )
+
+        println("Beam FEM completed. Max Von Mises: ", fem_result["max_von_mises_MPa"], " MPa")
+
+        return json_response(200, fem_result)
+
+    catch e
+        @error "Beam FEM analysis failed" exception=(e, catch_backtrace())
+
+        return json_response(
+            500,
+            Dict(
+                "error"   => "3D Beam FEM analysis failed.",
+                "message" => sprint(showerror, e)
+            )
+        )
+    end
+end
+
+
+# ============================================================
+# GET BEAM STL & MSH
 # ============================================================
 
 @get "/design/beam/stl" function(req::HTTP.Request)
-
     try
-
         if !isfile(BEAM_STL_FILE)
-
             return json_response(
                 404,
                 Dict(
@@ -552,7 +534,6 @@ end
                     "path" => BEAM_STL_FILE
                 )
             )
-
         end
 
         println("Serving Beam STL: ", BEAM_STL_FILE)
@@ -567,7 +548,6 @@ end
         )
 
     catch e
-
         @error "Unable to read Beam STL" exception=(e, catch_backtrace())
 
         return json_response(
@@ -577,22 +557,12 @@ end
                 "message" => sprint(showerror, e)
             )
         )
-
     end
-
 end
 
-
-# ============================================================
-# GET BEAM MSH
-# ============================================================
-
 @get "/design/beam/mesh" function(req::HTTP.Request)
-
     try
-
         if !isfile(BEAM_MESH_FILE)
-
             return json_response(
                 404,
                 Dict(
@@ -600,7 +570,6 @@ end
                     "path" => BEAM_MESH_FILE
                 )
             )
-
         end
 
         println("Serving Beam MSH: ", BEAM_MESH_FILE)
@@ -616,7 +585,6 @@ end
         )
 
     catch e
-
         @error "Unable to read Beam MSH" exception=(e, catch_backtrace())
 
         return json_response(
@@ -626,9 +594,7 @@ end
                 "message" => sprint(showerror, e)
             )
         )
-
     end
-
 end
 
 
@@ -637,26 +603,24 @@ end
 # ============================================================
 
 @post "/report/beam" function(req::HTTP.Request)
-
     try
-
-        body = JSON3.read(
-            String(req.body)
-        )
+        body = JSON3.read(String(req.body))
 
         Span = Float64(body.Span)
         wu   = Float64(body.wu)
         Wu   = Float64(body.Wu)
         b1   = haskey(body, :b1) ? Float64(body.b1) : 100.0
+        bc   = extract_bc(body)
 
-        return json_response(
-            200,
+        report_payload = if applicable(Generate_Beam_Report, Span, wu, Wu, b1, bc)
+            Generate_Beam_Report(Span, wu, Wu, b1, bc)
+        else
             Generate_Beam_Report(Span, wu, Wu, b1)
-        )
+        end
 
+        return json_response(200, report_payload)
 
     catch e
-
         @error "Beam report generation failed" exception=(e, catch_backtrace())
 
         return json_response(
@@ -666,70 +630,9 @@ end
                 "message" => sprint(showerror, e)
             )
         )
-
-    end
-
-end
-
-
-# ============================================================
-# LLM REPORT
-# ============================================================
-
-@post "/report/column" function(req::HTTP.Request)
-    try
-        body = JSON3.read(String(req.body))
-
-        return Generate_Column_Report(
-            Float64(body.Length),
-            Float64(body.Fac_Axial_Load),
-            Int(body.Boundary_Condition),
-            String(body.Sections)
-        )
-
-    catch e
-        @error "Report generation failed" exception=(e, catch_backtrace())
-
-        return json_response(
-            500,
-            Dict(
-                "error" => "Unable to generate column report.",
-                "message" => sprint(showerror, e)
-            )
-        )
     end
 end
 
-
-# ============================================================
-# START SERVER
-# ============================================================
-
-println()
-println("==============================================")
-println("       PROJECT CIPHER - DESIGN ENGINE")
-println("==============================================")
-println()
-println("Server : http://127.0.0.1:8080")
-println()
-println("Routes:")
-println("  GET  /health")
-println("  POST /design/column")
-println("  POST /fem/column")
-println("  GET  /design/column/stl")
-println("  GET  /design/column/mesh")
-println("  POST /report/column")
-println("  POST /design/beam")
-println("  GET  /design/beam/stl")
-println("  GET  /design/beam/mesh")
-println("  POST /report/beam")
-println("  POST /design/lacing")
-println("  POST /fem/lacing")
-println("  GET  /design/lacing/stl")
-println("  POST /report/lacing")
-println()
-println("==============================================")
-println()
 
 # ============================================================
 # LACING COLUMN DESIGN
@@ -765,9 +668,6 @@ println()
         println("Lacing column design successful.")
         println("Selected section: ", get(result, "Chord_Section", "Unknown"))
 
-        # ----------------------------------------------------
-        # GENERATE MESH
-        # ----------------------------------------------------
         println("Generating Gmsh mesh for lacing column...")
 
         mesh_result = create_lacing_column_mesh(
@@ -994,35 +894,6 @@ $(get(result, "Status", "N/A"))
 end
 
 
-# ============================================================
-# START SERVER
-# ============================================================
-
-println()
-println("==============================================")
-println("       PROJECT CIPHER - DESIGN ENGINE")
-println("==============================================")
-println()
-println("Server : http://127.0.0.1:8080")
-println()
-println("Routes:")
-println("  GET  /health")
-println("  POST /design/column")
-println("  POST /fem/column")
-println("  GET  /design/column/stl")
-println("  GET  /design/column/mesh")
-println("  POST /report/column")
-println("  POST /design/beam")
-println("  GET  /design/beam/stl")
-println("  GET  /design/beam/mesh")
-println("  POST /report/beam")
-println("  POST /design/lacing")
-println("  POST /fem/lacing")
-println("  GET  /design/lacing/stl")
-println("  POST /report/lacing")
-println()
-println("==============================================")
-println()
 
 serve(
     host = "127.0.0.1",
